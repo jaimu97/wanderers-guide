@@ -53,6 +53,7 @@ import InventoryPanel from './panels/InventoryPanel';
 import NotesPanel from './panels/NotesPanel';
 import SkillsActionsPanel from './panels/SkillsActionsPanel';
 import SpellsPanel from './panels/SpellsPanel';
+import DicePanel from './panels/DicePanel';
 import ArmorSection from './sections/ArmorSection';
 import AttributeSection from './sections/AttributeSection';
 import EntityInfoSection from './sections/EntityInfoSection';
@@ -64,9 +65,6 @@ import { convertToSetEntity } from '@utils/type-fixing';
 import ModesDrawer from '@common/modes/ModesDrawer';
 import CampaignDrawer from '@pages/campaign/CampaignDrawer';
 import useCharacter from '@utils/use-character';
-
-// Use lazy imports here to prevent a huge amount of js on initial load (3d dice smh)
-const DiceRoller = lazy(() => import('@common/dice/DiceRoller'));
 
 export function Component(props: {}) {
   setPageTitle(`Sheet`);
@@ -160,9 +158,6 @@ function CharacterSheetInner(props: { content: ContentPackage; characterId: numb
 
   const activeModes = getVariable<VariableListStr>('CHARACTER', 'ACTIVE_MODES')?.value || [];
 
-  const [openedDiceRoller, setOpenedDiceRoller] = useState(false);
-  const [loadedDiceRoller, setLoadedDiceRoller] = useState(false);
-
   const [openedCampaign, setOpenedCampaign] = useState(false);
   const [openedModes, setOpenedModes] = useState(false);
 
@@ -246,38 +241,8 @@ function CharacterSheetInner(props: { content: ContentPackage; characterId: numb
               <IconFlag size='1.7rem' stroke={1.5} />
             </ActionIcon>
           )}
-          {character?.options?.dice_roller && (
-            <ActionIcon
-              size={40}
-              variant='light'
-              style={{
-                backdropFilter: 'blur(8px)',
-                WebkitBackdropFilter: 'blur(8px)',
-              }}
-              radius={100}
-              aria-label='Dice Roller'
-              onClick={() => {
-                if (!loadedDiceRoller) {
-                  setLoadedDiceRoller(true);
-                }
-                setOpenedDiceRoller(true);
-              }}
-            >
-              <GiRollingDices size='1.8rem' stroke={'1.5px'} />
-            </ActionIcon>
-          )}
         </Stack>
       </Box>
-      {loadedDiceRoller && (
-        <Suspense fallback={<></>}>
-          <DiceRoller
-            opened={openedDiceRoller}
-            onClose={() => {
-              setOpenedDiceRoller(false);
-            }}
-          />
-        </Suspense>
-      )}
       {openedModes && <ModesDrawer content={props.content} opened={true} onClose={() => setOpenedModes(false)} />}
       {openedCampaign && character?.campaign_id && (
         <CampaignDrawer campaignId={character?.campaign_id} opened={true} onClose={() => setOpenedCampaign(false)} />
@@ -307,6 +272,7 @@ function SectionPanels(props: {
 
   const iconStyle = { width: rem(12), height: rem(12) };
   const allSheetTabs = [
+    'dice-roller',
     'skills-actions',
     'inventory',
     'spells',
@@ -316,11 +282,15 @@ function SectionPanels(props: {
     'notes',
     'extras',
   ];
-  const primarySheetTabs = getVariable<VariableListStr>('CHARACTER', 'PRIMARY_SHEET_TABS')?.value ?? [];
+  const userPrimarySheetTabs = getVariable<VariableListStr>('CHARACTER', 'PRIMARY_SHEET_TABS')?.value ?? [];
+  // dice-roller as the primary tab instead of the side panel
+  const primarySheetTabs = ['dice-roller', ...userPrimarySheetTabs.filter((tab) => tab !== 'dice-roller')];
   const tabOptions = allSheetTabs.filter((tab) => !primarySheetTabs.includes(tab));
   const openedTabOption = tabOptions.find((tab) => tab === activeTab);
   const getTabIcon = (tab: string) => {
     switch (tab) {
+      case 'dice-roller':
+        return <GiRollingDices style={iconStyle} />;
       case 'skills-actions':
         return <IconBadgesFilled style={iconStyle} />;
       case 'inventory':
@@ -345,7 +315,7 @@ function SectionPanels(props: {
   useEffect(() => {
     // Open first tab when finished loading
     if (props.isLoaded && activeTab === null) {
-      setActiveTab('skills-actions');
+      setActiveTab('dice-roller');
     }
   }, [props.isLoaded, activeTab]);
 
@@ -362,6 +332,10 @@ function SectionPanels(props: {
       <Box>
         {props.hideSections && (
           <BlurBox blur={10} p='sm' mih={props.panelHeight}>
+            {activeTab === 'dice-roller' && (
+              <DicePanel panelHeight={props.panelHeight} panelWidth={props.panelWidth} />
+            )}
+
             {activeTab === 'skills-actions' && (
               <SkillsActionsPanel
                 id='CHARACTER'
@@ -454,6 +428,17 @@ function SectionPanels(props: {
                     Health, Attributes, Saves
                   </Button>
                   <SimpleGrid cols={2}>
+                    <Button
+                      leftSection={<GiRollingDices size='1.2rem' />}
+                      variant={activeTab === 'dice-roller' && props.hideSections ? 'filled' : 'outline'}
+                      onClick={() => {
+                        setActiveTab('dice-roller');
+                        props.onHideSections(true);
+                        setOpenedPhonePanel(false);
+                      }}
+                    >
+                      Dice Roller
+                    </Button>
                     <Button
                       leftSection={<IconBadgesFilled size='1.2rem' stroke={2} />}
                       variant={activeTab === 'skills-actions' && props.hideSections ? 'filled' : 'outline'}
@@ -570,6 +555,18 @@ function SectionPanels(props: {
             activateTabWithKeyboard={false}
           >
             <Tabs.List pb={10} grow>
+              {primarySheetTabs.includes('dice-roller') && (
+                <Tabs.Tab
+                  value='dice-roller'
+                  style={{
+                    border:
+                      activeTab === 'dice-roller' ? `1px solid ` + theme.colors.dark[4] : `1px solid transparent`,
+                  }}
+                  leftSection={getTabIcon('dice-roller')}
+                >
+                  Dice Roller
+                </Tabs.Tab>
+              )}
               {primarySheetTabs.includes('skills-actions') && (
                 <Tabs.Tab
                   value='skills-actions'
@@ -688,6 +685,10 @@ function SectionPanels(props: {
                 </Menu.Dropdown>
               </Menu>
             </Tabs.List>
+
+            <Tabs.Panel value='dice-roller'>
+              <DicePanel panelHeight={props.panelHeight} panelWidth={props.panelWidth} />
+            </Tabs.Panel>
 
             <Tabs.Panel value='skills-actions'>
               <SkillsActionsPanel

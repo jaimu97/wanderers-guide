@@ -288,6 +288,29 @@ export function CharacterDetailedInfo(props: { character: Character | null; name
                 ]}
               />
             </Box>
+            <Box
+              style={{
+                position: 'absolute',
+                bottom: -5,
+                left: '50%',
+                transform: 'translateX(-50%)',
+                backgroundColor: theme.colors.dark[6],
+                padding: '2px 6px',
+                borderRadius: 4,
+              }}
+            >
+              <Group gap={3} wrap='nowrap'>
+                <Text
+                  size='xs'
+                  fw={600}
+                  c={interpolateHealth(currentHealth / maxHealth)}
+                >
+                  {currentHealth}
+                </Text>
+                <Text size='xs' c='gray.4'>/</Text>
+                <Text size='xs' c='gray.3'>{maxHealth}</Text>
+              </Group>
+            </Box>
           </Box>
 
           <div style={{ flex: 1 }}>

@@ -88,6 +88,9 @@ export default function HealthSection(props: {
                   </Anchor>
                 </Box>
               </Group>
+              <Text ta='center' fz='xs' c={interpolateHealth(currentHealth / maxHealth)} mt={-5}>
+                {maxHealth > 0 ? Math.round((currentHealth / maxHealth) * 100) : 0}%
+              </Text>
             </Box>
 
             <Box>

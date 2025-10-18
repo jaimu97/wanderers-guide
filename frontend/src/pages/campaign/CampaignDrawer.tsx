@@ -51,25 +51,25 @@ export default function CampaignDrawer(props: { opened: boolean; onClose: () => 
   });
 
   const getCharacterStatusCard = (character: Character) => {
+    const currentHealth = character.hp_current ?? 0;
+    const maxHealth = character.meta_data?.calculated_stats?.hp_max ?? 0;
+    const healthColor = currentHealth === 0 ? 'black' : interpolateHealth(currentHealth / maxHealth);
+    
     return (
       <Group gap={10} px={5}>
         <Text>›</Text>
         <Text>{character.name}</Text>
-        <ActionIcon
-          variant='transparent'
-          aria-label='Health'
-          size='lg'
-          color={
-            character.hp_current === 0
-              ? 'black'
-              : interpolateHealth(character.hp_current / (character.meta_data?.calculated_stats?.hp_max ?? 0))
-          }
-          style={{
-            cursor: 'default',
-          }}
-        >
-          <IconHeartFilled style={{ width: '70%', height: '70%' }} stroke={1.5} />
-        </ActionIcon>
+        <Group gap={5} wrap='nowrap'>
+          <Text
+            size='sm'
+            fw={500}
+            c={healthColor}
+          >
+            {currentHealth}
+          </Text>
+          <Text size='sm' c='gray.4'>/</Text>
+          <Text size='sm' c='gray.3'>{maxHealth}</Text>
+        </Group>
         {character.details?.conditions?.length && (
           <Badge size='md' color='red.6' circle>
             {character.details?.conditions?.length}
