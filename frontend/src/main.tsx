@@ -19,6 +19,17 @@ import './index.css';
 import { ErrorPage } from './pages/ErrorPage.tsx';
 import { MantineProvider } from '@mantine/core';
 
+// Hi Cobbe, Jai here. If for whatever reason you use SSL, remove this function :)
+if (!crypto.randomUUID) {
+  crypto.randomUUID = function() {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+      const r = Math.random() * 16 | 0;
+      const v = c === 'x' ? r : (r & 0x3 | 0x8);
+      return v.toString(16);
+    });
+  } as () => `${string}-${string}-${string}-${string}-${string}`;
+}
+
 const queryClient = new QueryClient();
 
 export const supabase = createClient(
@@ -30,9 +41,11 @@ export const supabase = createClient(
 // Fixes cache issues on refresh
 (async () => {
   // Clear the cache on startup
-  const keys = await caches.keys();
-  for (const key of keys) {
-    caches.delete(key);
+  if ('caches' in window) {  // http shit idk Cobbe, I'm losing it man :(
+    const keys = await caches.keys();
+    for (const key of keys) {
+      caches.delete(key);
+    }
   }
 
   // Unregister our service worker
