@@ -39,6 +39,27 @@ export default function EntityInfoSection(props: {
     expRef.current?.blur();
   };
 
+  // I take 1000 xp and give you 1 level
+  const handleLevelUp = () => {
+    if (!props.entity || !isCharacter(props.entity)) return;
+    const currentExp = props.entity.experience || 0;
+    if (currentExp < 1000) return;
+    
+    props.setEntity((entity) => {
+      if (!entity) return entity;
+      return {
+        ...entity,
+        experience: currentExp - 1000,
+        level: entity.level + 1,
+      };
+    });
+    
+    // and then derail the campaign by taking you to the character builder
+    navigate(`/builder/${props.entity.id}`);
+  };
+
+  const showLevelUpButton = isCharacter(props.entity) && (props.entity.experience || 0) >= 1000;
+
   return (
     <BlurBox blur={10}>
       <Box
@@ -53,39 +74,52 @@ export default function EntityInfoSection(props: {
       >
         <Group gap={20} wrap='nowrap' align='flex-start'>
           {isCharacter(props.entity) && (
-            <CharacterInfo
-              character={props.entity}
-              color='gray.5'
-              nameCutOff={20}
-              onClickAncestry={() => {
-                openDrawer({
-                  type: 'ancestry',
-                  data: { id: (props.entity as Character)?.details?.ancestry?.id },
-                  extra: { addToHistory: true },
-                });
-              }}
-              onClickBackground={() => {
-                openDrawer({
-                  type: 'background',
-                  data: { id: (props.entity as Character)?.details?.background?.id },
-                  extra: { addToHistory: true },
-                });
-              }}
-              onClickClass={() => {
-                openDrawer({
-                  type: 'class',
-                  data: { id: (props.entity as Character)?.details?.class?.id },
-                  extra: { addToHistory: true },
-                });
-              }}
-              onClickClass2={() => {
-                openDrawer({
-                  type: 'class',
-                  data: { id: (props.entity as Character)?.details?.class_2?.id },
-                  extra: { addToHistory: true },
-                });
-              }}
-            />
+            <Stack gap={5}>
+              <CharacterInfo
+                character={props.entity}
+                color='gray.5'
+                nameCutOff={20}
+                onClickAncestry={() => {
+                  openDrawer({
+                    type: 'ancestry',
+                    data: { id: (props.entity as Character)?.details?.ancestry?.id },
+                    extra: { addToHistory: true },
+                  });
+                }}
+                onClickBackground={() => {
+                  openDrawer({
+                    type: 'background',
+                    data: { id: (props.entity as Character)?.details?.background?.id },
+                    extra: { addToHistory: true },
+                  });
+                }}
+                onClickClass={() => {
+                  openDrawer({
+                    type: 'class',
+                    data: { id: (props.entity as Character)?.details?.class?.id },
+                    extra: { addToHistory: true },
+                  });
+                }}
+                onClickClass2={() => {
+                  openDrawer({
+                    type: 'class',
+                    data: { id: (props.entity as Character)?.details?.class_2?.id },
+                    extra: { addToHistory: true },
+                  });
+                }}
+              />
+              {showLevelUpButton && (
+                <BlurButton
+                  size='compact-xs'
+                  bgColor={ICON_BG_COLOR}
+                  fw={500}
+                  fullWidth
+                  onClick={handleLevelUp}
+                >
+                  Level Up
+                </BlurButton>
+              )}
+            </Stack>
           )}
           {isCreature(props.entity) && <CreatureDetailedInfo id={props.id} creature={props.entity} />}
 
