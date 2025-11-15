@@ -16,7 +16,7 @@ import { CreatureDetailedInfo } from '@common/CreatureInfo';
 import { ICON_BG_COLOR } from '@constants/data';
 import { modals } from '@mantine/modals';
 
-export default function EntityInfoSection(props: {
+export default function EntityInfoSection(this: any, props: {
   id: StoreID;
   entity: LivingEntity | null;
   setEntity: SetterOrUpdater<LivingEntity | null>;
@@ -72,7 +72,7 @@ export default function EntityInfoSection(props: {
           position: 'relative',
         }}
       >
-        <Group gap={20} wrap='nowrap' align='flex-start'>
+        <Group gap={5} wrap='nowrap' align='flex-start'>
           {isCharacter(props.entity) && (
             <Stack gap={5}>
               <CharacterInfo
@@ -108,17 +108,6 @@ export default function EntityInfoSection(props: {
                   });
                 }}
               />
-              {showLevelUpButton && (
-                <BlurButton
-                  size='compact-xs'
-                  bgColor={ICON_BG_COLOR}
-                  fw={500}
-                  fullWidth
-                  onClick={handleLevelUp}
-                >
-                  Level Up
-                </BlurButton>
-              )}
             </Stack>
           )}
           {isCreature(props.entity) && <CreatureDetailedInfo id={props.id} creature={props.entity} />}
@@ -175,7 +164,7 @@ export default function EntityInfoSection(props: {
                 </BlurButton>
               </Box>
             </Stack>
-            <Stack gap={0}>
+            <Stack gap={5}>
               <Box>
                 <Text fz='xs' ta='center' c='gray.3'>
                   Lvl. {props.entity ? getEntityLevel(props.entity) : '?'}
@@ -207,6 +196,19 @@ export default function EntityInfoSection(props: {
                   ])}
                 />
               </Box>
+              {showLevelUpButton && (
+              <Box>
+                <BlurButton
+                  size='compact-xs'
+                  bgColor={ICON_BG_COLOR}
+                  fw={500}
+                  fullWidth
+                  onClick={handleLevelUp}
+                >
+                  Level Up
+                </BlurButton>
+              </Box>
+              )}
             </Stack>
           </Stack>
         </Group>
