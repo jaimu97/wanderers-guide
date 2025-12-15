@@ -7,6 +7,7 @@ import UploadContent from './UploadContent';
 import BackgroundFixer from './BackgroundFixer';
 import TraitMerger from './TraitMerger';
 import ContentUpdateRetrigger from './ContentUpdateRetrigger';
+import DumpCharacters from './DumpCharacters';
 
 export function Component() {
   setPageTitle(`Admin Panel`);
@@ -20,6 +21,7 @@ export function Component() {
       <BackgroundFixer />
       <ContentUpdateRetrigger />
       <TraitMerger />
+      <DumpCharacters />
     </Stack>
   );
 }
