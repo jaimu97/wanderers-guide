@@ -47,7 +47,8 @@ export type TraitType =
   | 'PET'
   | 'FAMILIAR'
   | 'NOISY'
-  | 'FLARE';
+  | 'FLARE'
+  | 'SPELLHEART';
 const traitMap: Record<number, TraitType> = {
   // Hardcoded trait ids:
   1437: 'GENERAL',
@@ -81,24 +82,25 @@ const traitMap: Record<number, TraitType> = {
   1504: 'MAGICAL',
   1546: 'STAFF',
   1665: 'WAND',
-  3668: 'ARCHAIC',
-  3677: 'TECH',
-  3672: 'ANALOG',
-  3673: 'TRACKING-1',
-  3674: 'TRACKING-2',
-  3675: 'TRACKING-3',
-  4001: 'TRACKING-4',
+  4667: 'ARCHAIC',
+  4506: 'TECH',
+  4665: 'ANALOG',
+  4681: 'TRACKING-1',
+  4682: 'TRACKING-2',
+  4685: 'TRACKING-3',
+  4684: 'TRACKING-4',
   4002: 'RESILIENT-1',
   4003: 'RESILIENT-2',
   4004: 'RESILIENT-3',
   4005: 'RESILIENT-4',
-  4097: 'AUGMENTATION',
+  4550: 'AUGMENTATION',
   2865: 'HINDERING',
   1538: 'COMPANION',
   4265: 'PET',
   3843: 'FAMILIAR',
   1582: 'NOISY',
   4629: 'FLARE',
+  2570: 'SPELLHEART',
 };
 
 export function getTraitTypeById(traitId: number): TraitType | null {

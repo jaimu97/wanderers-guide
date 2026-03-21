@@ -1,18 +1,12 @@
-import { ItemIcon } from '@common/ItemIcon';
-import { getConditionByName } from '@conditions/condition-handler';
-import { fetchContentAll, getCachedSources } from '@content/content-store';
+import { fetchContentAll, getContentFast, getDefaultSources } from '@content/content-store';
 import { isPlayingStarfinder } from '@content/system-handler';
-import { showNotification } from '@mantine/notifications';
-import { Character, ContentPackage, Inventory, InventoryItem, Item, LivingEntity } from '@typing/content';
+import { ContentPackage, ContentSource, Inventory, InventoryItem, Item, LivingEntity } from '@typing/content';
 import { Operation } from '@typing/operations';
-import { StoreID, VariableListStr } from '@typing/variables';
+import { StoreID } from '@typing/variables';
 import { getTraitIdByType, hasTraitType, TraitType } from '@utils/traits';
-import { isCharacter } from '@utils/type-fixing';
-import { getFinalAcValue, getFinalVariableValue } from '@variables/variable-display';
-import { addVariableBonus, getAllSkillVariables, getAllSpeedVariables, getVariable } from '@variables/variable-manager';
-import { labelToVariable } from '@variables/variable-utils';
-import { cloneDeep, uniq, uniqBy } from 'lodash-es';
-import { SetterOrUpdater } from 'recoil';
+import { getFinalAcValue, getFinalVariableValue } from '@variables/variable-helpers';
+import { addVariableBonus, getAllSkillVariables, getAllSpeedVariables } from '@variables/variable-manager';
+import { cloneDeep, uniq } from 'lodash-es';
 
 /**
  * Get all items in the inventory, including items in containers, as a single array
@@ -40,9 +34,9 @@ export function getFlatInvItems(inv: Inventory) {
  * @param inv - Inventory
  * @returns - Total bulk as a number
  */
-export function getInvBulk(inv: Inventory) {
+export function getInvBulk(inv: Inventory | undefined) {
   let totalBulk = 0;
-  for (const invItem of inv.items) {
+  for (const invItem of inv?.items ?? []) {
     totalBulk += getItemBulk(invItem);
 
     if (isItemContainer(invItem.item)) {
@@ -77,7 +71,7 @@ export function getItemBulk(invItem: InventoryItem) {
   const armorWornModifier = isItemArmor(invItem.item) && !invItem.is_equipped ? 1 : 0;
 
   const baseItemBulk = invItem.is_equipped
-    ? invItem.item.meta_data?.bulk?.held_or_stowed ?? (parseFloat(invItem.item.bulk ?? '0') || 0)
+    ? (invItem.item.meta_data?.bulk?.held_or_stowed ?? (parseFloat(invItem.item.bulk ?? '0') || 0))
     : parseFloat(invItem.item.bulk ?? '0') || 0;
 
   totalBulk = (baseItemBulk + armorWornModifier) * getItemQuantity(invItem.item);
@@ -86,52 +80,10 @@ export function getItemBulk(invItem: InventoryItem) {
   return totalBulk >= 0.1 && totalBulk < 1 ? 0.1 : Math.floor(totalBulk);
 }
 
-/**
- * Utility function to handle adding an item to the inventory
- * @param setInventory - Inventory state setter
- * @param item - Item to add
- * @param is_formula - Whether the item is a formula
- */
-export const handleAddItem = async (
-  setInventory: React.Dispatch<React.SetStateAction<Inventory>>,
-  item: Item,
-  is_formula: boolean
-) => {
-  const container_contents = await getDefaultContainerContents(item);
-  setInventory((prev) => {
-    const itemData = cloneDeep(item);
-    if (itemData.meta_data) {
-      itemData.meta_data.hp = itemData.meta_data.hp_max;
-    }
-    const newItems = [
-      ...cloneDeep(prev.items),
-      {
-        id: crypto.randomUUID(),
-        item: itemData,
-        is_formula: is_formula,
-        is_equipped: false,
-        is_invested: false,
-        is_implanted: false,
-        container_contents,
-      },
-    ].sort((a, b) => a.item.name.localeCompare(b.item.name));
-    return {
-      ...prev,
-      items: newItems,
-    };
-  });
-  showNotification({
-    title: 'Added to Inventory',
-    message: `Added ${item.name}.`,
-    icon: <ItemIcon item={item} size='1.0rem' color='#f8f9fa' useDefaultIcon />,
-    autoClose: 1000,
-  });
-};
-
-async function getDefaultContainerContents(item: Item, allItems?: Item[], count = 1): Promise<InventoryItem[]> {
+export async function getDefaultContainerContents(item: Item, allItems?: Item[], count = 1): Promise<InventoryItem[]> {
   if (count > 10) return [];
   if ((item.meta_data?.container_default_items ?? []).length === 0) return [];
-  const items = allItems ? allItems : await fetchContentAll<Item>('item');
+  const items = allItems ? allItems : await fetchContentAll<Item>('item', getDefaultSources('PAGE'));
 
   const invItems: InventoryItem[] = [];
   for (const record of item.meta_data?.container_default_items ?? []) {
@@ -235,296 +187,6 @@ export function applyEquipmentPenalties(storeId: StoreID, entity: LivingEntity) 
   if (bestShield) applyPenalties(bestShield);
 }
 
-export function checkBulkLimit(
-  storeId: StoreID,
-  entity: LivingEntity,
-  setEntity: SetterOrUpdater<LivingEntity | null>,
-  addEncumbered: boolean
-) {
-  setTimeout(() => {
-    if (!entity.inventory) return;
-    if (addEncumbered && Math.floor(getInvBulk(entity.inventory)) > getBulkLimit(storeId)) {
-      // Add encumbered condition
-      const newConditions = cloneDeep(entity.details?.conditions ?? []);
-      const encumbered = newConditions.find((c) => c.name === 'Encumbered');
-      if (!encumbered) {
-        newConditions.push(getConditionByName('Encumbered', 'Over Bulk Limit')!);
-
-        // if (Math.floor(getInvBulk(character.inventory)) > getBulkLimitImmobile(storeId)) {
-        //   const immobilized = newConditions.find((c) => c.name === 'Immobilized');
-        //   if (!immobilized) {
-        //     newConditions.push(getConditionByName('Immobilized', 'Way Over Bulk Limit')!);
-        //   }
-        // }
-
-        setEntity((c) => {
-          if (!c) return c;
-          return {
-            ...c,
-            details: {
-              ...c.details,
-              conditions: newConditions,
-            },
-          };
-        });
-      }
-    } else {
-      // Remove encumbered condition
-      const newConditions = cloneDeep(entity.details?.conditions ?? []);
-      const encumbered = newConditions.find((c) => c.name === 'Encumbered' && c.source === 'Over Bulk Limit');
-      if (encumbered) {
-        newConditions.splice(newConditions.indexOf(encumbered), 1);
-        setEntity((c) => {
-          if (!c) return c;
-          return {
-            ...c,
-            details: {
-              ...c.details,
-              conditions: newConditions,
-            },
-          };
-        });
-      }
-    }
-  }, 200);
-}
-
-export function addExtraItems(
-  storeId: StoreID,
-  items: Item[],
-  entity: LivingEntity,
-  setEntity: SetterOrUpdater<LivingEntity | null>
-) {
-  // Add extra items
-  setTimeout(async () => {
-    const extraItems: InventoryItem[] = [];
-
-    let extraItemIds = getVariable<VariableListStr>(storeId, 'EXTRA_ITEM_IDS')?.value ?? [];
-    if (isCharacter(entity)) {
-      extraItemIds = [...extraItemIds, '9252']; // Hardcoded Fist ID
-    }
-
-    for (const itemId of extraItemIds) {
-      const item = items.find((item) => `${item.id}` === itemId);
-      const hasItemAdded = entity.meta_data?.given_item_ids?.includes(parseInt(itemId));
-      if (item && !hasItemAdded) {
-        const baseItem = item.meta_data?.base_item
-          ? items.find((i) => labelToVariable(i.name) === labelToVariable(item.meta_data!.base_item!))
-          : undefined;
-
-        extraItems.push({
-          id: 'extra-item-' + itemId,
-          item: {
-            ...item,
-            meta_data: item.meta_data
-              ? {
-                  ...item.meta_data,
-                  base_item_content: baseItem,
-                }
-              : undefined,
-          },
-          is_formula: false,
-          is_equipped: isItemEquippable(item),
-          is_invested: isItemInvestable(item),
-          is_implanted: isItemImplantable(item),
-          container_contents: await getDefaultContainerContents(item, items),
-        });
-      }
-    }
-
-    if (extraItems.length === 0) return;
-
-    setEntity((c) => {
-      if (!c) return c;
-      return {
-        ...c,
-        inventory: {
-          ...(c.inventory ?? {
-            coins: {
-              cp: 0,
-              sp: 0,
-              gp: 0,
-              pp: 0,
-            },
-            items: [],
-          }),
-          items: uniqBy([...(c.inventory?.items ?? []), ...extraItems], 'id'),
-        },
-        meta_data: {
-          ...c.meta_data,
-          given_item_ids: uniq([...(c.meta_data?.given_item_ids ?? []), ...extraItems.map((item) => item.item.id)]),
-        },
-      };
-    });
-  }, 100);
-
-  // Remove extra items that are no longer in the list
-  setTimeout(() => {
-    if (!entity.inventory) return;
-
-    const givenItemIds = entity.meta_data?.given_item_ids ?? [];
-    let extraItemIds = getVariable<VariableListStr>(storeId, 'EXTRA_ITEM_IDS')?.value ?? [];
-    if (isCharacter(entity)) {
-      extraItemIds = [...extraItemIds, '9252']; // Hardcoded Fist ID
-    }
-
-    const itemsToRemove = givenItemIds.filter((id) => !extraItemIds.includes(`${id}`));
-    if (itemsToRemove.length === 0) return;
-
-    setEntity((c) => {
-      if (!c) return c;
-      return {
-        ...c,
-        inventory: {
-          ...c.inventory!,
-          items: c.inventory!.items.filter((item) => !itemsToRemove.includes(item.item.id)),
-        },
-        meta_data: {
-          ...c.meta_data,
-          given_item_ids: c.meta_data?.given_item_ids?.filter((id) => !itemsToRemove.includes(id)),
-        },
-      };
-    });
-  }, 200);
-}
-
-/**
- * Utility function to handle deleting an item from the inventory
- * @param setInventory - Inventory state setter
- * @param invItem - Inventory item to delete
- */
-export const handleDeleteItem = (
-  setInventory: React.Dispatch<React.SetStateAction<Inventory>>,
-  invItem: InventoryItem
-) => {
-  setInventory((prev) => {
-    const newItems = cloneDeep(prev.items.filter((item) => item.id !== invItem.id));
-    // Remove from all containers
-    newItems.forEach((item) => {
-      if (isItemContainer(item.item)) {
-        item.container_contents = item.container_contents.filter((containedItem) => containedItem.id !== invItem.id);
-      }
-    });
-    return {
-      ...prev,
-      items: newItems,
-    };
-  });
-};
-
-/**
- * Utility function to handle updating an item in the inventory
- * @param setInventory - Inventory state setter
- * @param invItem - Inventory item to update
- */
-export const handleUpdateItem = (
-  setInventory: React.Dispatch<React.SetStateAction<Inventory>>,
-  invItem: InventoryItem
-) => {
-  setInventory((prev) => {
-    const newItems = cloneDeep(prev.items).map((item) => {
-      if (item.id === invItem.id) {
-        return cloneDeep(invItem);
-      }
-      return item;
-    });
-    // Update if it's in a container
-    newItems.forEach((item) => {
-      if (isItemContainer(item.item)) {
-        item.container_contents = item.container_contents.map((containedItem) => {
-          if (containedItem.id === invItem.id) {
-            return cloneDeep(invItem);
-          }
-          return containedItem;
-        });
-      }
-    });
-    return {
-      ...prev,
-      items: newItems,
-    };
-  });
-};
-
-/**
- * Utility function to handle moving an item in the inventory
- * @param setInventory - Inventory state setter
- * @param invItem - Inventory item to move
- * @param containerItem - Container item to move to
- */
-export const handleMoveItem = (
-  setInventory: React.Dispatch<React.SetStateAction<Inventory>>,
-  invItem: InventoryItem,
-  containerItem: InventoryItem | null
-) => {
-  const movingItem = cloneDeep(invItem);
-  handleDeleteItem(setInventory, invItem);
-  setTimeout(() => {
-    setInventory((prev) => {
-      let newItems: InventoryItem[] = [];
-      if (containerItem) {
-        const foundContainer = cloneDeep(prev.items.find((item) => item.id === containerItem.id));
-        if (!foundContainer) return prev;
-        movingItem.is_equipped = false;
-        newItems = cloneDeep(prev.items).map((item) => {
-          if (item.id === foundContainer.id) {
-            item.container_contents.push(movingItem);
-          }
-          return item;
-        });
-      } else {
-        newItems = [...cloneDeep(prev.items), movingItem];
-      }
-      return {
-        ...prev,
-        items: newItems,
-      };
-    });
-  }, 100);
-};
-
-/**
- * Utility function to update the charges for an item
- * @param setEntity - LivingEntity state setter
- * @param invItem - Inventory item to update
- * @param charges - Charges to set
- */
-export const handleUpdateItemCharges = (
-  setEntity: React.Dispatch<React.SetStateAction<LivingEntity | null>>,
-  invItem: InventoryItem,
-  charges: { current?: number; max?: number }
-) => {
-  setEntity((char) => {
-    if (!char || !char.inventory) return null;
-
-    return {
-      ...char,
-      inventory: {
-        ...char.inventory,
-        items: char.inventory.items.map((i) => {
-          if (i.id !== invItem.id) return i;
-
-          // If it's the item, update the charges
-          return {
-            ...i,
-            item: {
-              ...i.item,
-              meta_data: {
-                ...i.item.meta_data!,
-                charges: {
-                  ...i.item.meta_data?.charges,
-                  current: charges.current ?? i.item.meta_data?.charges?.current,
-                  max: charges.max ?? i.item.meta_data?.charges?.max,
-                },
-              },
-            },
-          };
-        }),
-      },
-    };
-  });
-};
-
 /**
  * Determines the "best" equipped armor in an inventory, based on total resulting AC
  * @param id - Variable Store ID
@@ -579,7 +241,7 @@ export function getItemOperations(item: Item, content: ContentPackage) {
   if (isItemWithRunes(item)) {
     if (isItemArmor(item)) {
       // Armor potency
-      const potency = item.meta_data?.runes?.potency ?? 0;
+      const potency = Math.min(item.meta_data?.runes?.potency ?? 0, 4);
       if (potency > 0) {
         const ops: Operation[] = [
           {
@@ -597,7 +259,7 @@ export function getItemOperations(item: Item, content: ContentPackage) {
       }
 
       // Armor resilient
-      const resilient = item.meta_data?.runes?.resilient ?? 0;
+      const resilient = Math.min(item.meta_data?.runes?.resilient ?? 0, 4);
       if (resilient > 0) {
         const ops: Operation[] = [
           {
@@ -794,7 +456,7 @@ export function isItemImplantable(item: Item) {
  * @returns - Whether the item is equippable
  */
 export function isItemEquippable(item: Item) {
-  return isItemWeapon(item) || isItemArmor(item) || isItemShield(item);
+  return isItemWeapon(item) || isItemArmor(item) || isItemShield(item) || isItemStave(item);
 }
 
 /**
@@ -805,7 +467,7 @@ export function isItemEquippable(item: Item) {
 export function isItemWithRunes(item: Item) {
   if (!item.meta_data?.runes) return false;
 
-  return item.meta_data.runes.potency || item.meta_data.runes.striking || item.meta_data.runes.resilient;
+  return !!(item.meta_data.runes.potency || item.meta_data.runes.striking || item.meta_data.runes.resilient);
 }
 
 /**
@@ -821,6 +483,36 @@ export function isItemWithPropertyRunes(item: Item) {
     item.meta_data.runes.property.length > 0 &&
     item.meta_data.runes.property.every((r) => r.id && r.name)
   );
+}
+
+// Fundamental Rune IDs Map
+export const FUNDAMENTAL_RUNES: Record<string, number> = {
+  potency_weapon_1: 7950, // Weapon Potency I
+  potency_weapon_2: 7951, // Weapon Potency II
+  potency_weapon_3: 7952, // Weapon Potency III
+  potency_weapon_4: 19854, // Weapon Potency IV
+  potency_weapon_10: 16927, // Weapon Potency (Mythic)
+  potency_armor_1: 6719, // Armor Potency I
+  potency_armor_2: 6720, // Armor Potency II
+  potency_armor_3: 6721, // Armor Potency III
+  potency_armor_10: 16924, // Armor Potency (Mythic)
+  striking_1: 7862, // Striking
+  striking_2: 7860, // Striking (Greater)
+  striking_3: 7861, // Striking (Major)
+  striking_10: 16926, // Striking (Mythic)
+  resilient_1: 7703, // Resilient
+  resilient_2: 7701, // Resilient (Greater)
+  resilient_3: 7702, // Resilient (Major)
+  resilient_10: 16925, // Resilient (Mythic)
+} as const;
+
+/**
+ * Utility function to detect if an item IS a fundamental rune
+ * @param item - Item
+ * @returns - Whether the item is a fundamental rune
+ */
+export function isItemFundamentalRune(item: Item) {
+  return Object.values(FUNDAMENTAL_RUNES).includes(item.id);
 }
 
 /**
@@ -895,6 +587,49 @@ export function isItemShield(item: Item) {
 }
 
 /**
+ * Utility function to determine if an item is a stave
+ * @param item - Item
+ * @returns - Whether the item is a stave
+ */
+export function isItemStave(item: Item) {
+  return hasTraitType('STAFF', item.traits);
+}
+
+/**
+ * Utility function to determine if an item is an unarmed attack / meta-attack
+ * @param item - Item
+ * @returns - Whether the item is a meta attack
+ */
+export function isItemMetaAttack(item: Item) {
+  return !!item.meta_data?.unselectable && isItemWeapon(item);
+}
+
+/**
+ * Utility function to determine if an item is an unarmed defense / meta-defense
+ * @param item - Item
+ * @returns - Whether the item is a meta defense
+ */
+export function isItemMetaDefense(item: Item) {
+  return !!item.meta_data?.unselectable && (isItemArmor(item) || isItemShield(item));
+}
+
+/**
+ * Utility function to determine the main label for the item
+ * @param item - Item
+ * @param includeLevel - Whether to include the item level in the label
+ * @returns - Item type label
+ */
+export function determineItemMetaType(item: Item, includeLevel?: boolean): string {
+  let type = `Item ${includeLevel ? item.level : ''}`.trim();
+  if (isItemMetaAttack(item)) {
+    type = `Attack`;
+  } else if (isItemMetaDefense(item)) {
+    type = `Defense`;
+  }
+  return type;
+}
+
+/**
  * Utility function to determine if an item is archaic (old weapon from Pathfinder)
  * @param item - Item
  * @returns - Whether the item is archaic
@@ -907,7 +642,7 @@ export function isItemArchaic(item: Item) {
     return false;
   }
 
-  const source = getCachedSources().find((source) => source.id === item.content_source_id);
+  const source = getContentFast<ContentSource>('content-source', [item.content_source_id])[0];
   if (!source) {
     return false;
   }

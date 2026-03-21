@@ -3,11 +3,11 @@ import { defineDefaultSources, fetchContentPackage } from '@content/content-stor
 import { downloadObjectAsJson } from '@export/export-to-json';
 import { isItemWeapon, getFlatInvItems, getBestArmor, getBestShield, getInvBulk, labelizeBulk } from '@items/inv-utils';
 import { getWeaponStats } from '@items/weapon-handler';
-import { executeCharacterOperations, executeCreatureOperations } from '@operations/operation-controller';
+import { executeOperations } from '@operations/operations.main';
 import { getSpellStats } from '@spells/spell-handler';
 import { isCantrip, isRitual } from '@spells/spell-utils';
-import { Character, LivingEntity, Spell } from '@typing/content';
-import { VariableListStr, VariableStr } from '@typing/variables';
+import { LivingEntity, SourceValue } from '@typing/content';
+import { StoreID, VariableListStr, VariableStr } from '@typing/variables';
 import { displayResistWeak } from '@utils/resist-weaks';
 import { toLabel } from '@utils/strings';
 import { isCharacter, isCreature, isTruthy } from '@utils/type-fixing';
@@ -15,19 +15,17 @@ import {
   getFinalAcValue,
   getFinalHealthValue,
   getFinalProfValue,
-  getFinalVariableValue,
   getProfValueParts,
   getSpeedValue,
-} from '@variables/variable-display';
+} from '@variables/variable-helpers';
 import {
   getAllAncestryTraitVariables,
   getAllAttributeVariables,
   getAllSpeedVariables,
   getVariable,
-  getVariableStore,
+  exportVariableStore,
   getVariables,
 } from '@variables/variable-manager';
-import { cloneDeep } from 'lodash-es';
 
 export default async function jsonV4(entity: LivingEntity) {
   const exportObject = {
@@ -43,21 +41,42 @@ export default async function jsonV4(entity: LivingEntity) {
   downloadObjectAsJson(exportObject, fileName);
 }
 
-export async function getJsonV4Content(entity: LivingEntity) {
+export async function getJsonV4Content(entity: LivingEntity, inputStoreID?: StoreID) {
   // Get all content that the character uses
+  let sv: SourceValue = 'ALL-USER-ACCESSIBLE';
   if (isCharacter(entity)) {
-    defineDefaultSources(entity.content_sources?.enabled ?? []);
+    sv = defineDefaultSources('PAGE', entity.content_sources?.enabled ?? []);
   } else if (isCreature(entity)) {
-    defineDefaultSources(undefined);
+    // If a store is provided, we assume current variables should be left untouched.
+    if (!inputStoreID) {
+      sv = defineDefaultSources('PAGE', 'ALL-USER-ACCESSIBLE');
+    }
   }
-  const content = await fetchContentPackage(undefined, { fetchSources: true });
-  const STORE_ID = isCharacter(entity) ? 'CHARACTER' : `CREATURE_${entity.id}`;
+  const content = await fetchContentPackage(sv, { fetchSources: true });
+  const STORE_ID = inputStoreID ?? (isCharacter(entity) ? 'CHARACTER' : `CREATURE_${entity.id}`);
 
-  // Execute all operations (to update the variables)
-  if (isCharacter(entity)) {
-    await executeCharacterOperations(entity, content, 'CHARACTER-BUILDER');
-  } else if (isCreature(entity)) {
-    await executeCreatureOperations(STORE_ID, entity, content);
+  // If we weren't provided a store, execute all operations (to update the variables)
+  // -- If a store is provided, we assume current variables should be left untouched.
+  if (!inputStoreID) {
+    if (isCharacter(entity)) {
+      await executeOperations({
+        type: 'CHARACTER',
+        data: {
+          character: entity,
+          content,
+          context: 'CHARACTER-BUILDER',
+        },
+      });
+    } else if (isCreature(entity)) {
+      await executeOperations({
+        type: 'CREATURE',
+        data: {
+          id: STORE_ID,
+          creature: entity,
+          content,
+        },
+      });
+    }
   }
 
   // Get all the data
@@ -212,7 +231,7 @@ export async function getJsonV4Content(entity: LivingEntity) {
   }
 
   // Raw data dump
-  const rawData = cloneDeep(getVariableStore(STORE_ID));
+  const rawData = exportVariableStore(STORE_ID);
 
   return {
     _README: `Here's some compiled data about the character. Should be fairly human-readable. The <character> section is what WG reads, this section is solely for you! Should give you an abundance of compiled stats and info about the character. If you have any questions, feel free to ask on our Discord!`,

@@ -3,6 +3,7 @@ import {
   Ancestry,
   Character,
   Class,
+  ClassArchetype,
   ContentPackage,
   ContentSource,
   Creature,
@@ -14,21 +15,25 @@ import {
   Operation,
   OperationCharacterResultPackage,
   OperationCreatureResultPackage,
+  OperationOptions,
+  OperationResult,
   OperationSelect,
 } from '@typing/operations';
-import { OperationOptions, OperationResult, runOperations } from './operation-runner';
+import { runOperations } from './operation-runner';
 import {
   addVariable,
   adjVariable,
+  exportVariableStore,
   getAllAttributeVariables,
   getAllSkillVariables,
   getVariable,
+  importVariableStore,
   resetVariables,
   setVariable,
 } from '@variables/variable-manager';
 import { isAttributeValue, labelToVariable, variableToLabel } from '@variables/variable-utils';
 import { hashData, rankNumber } from '@utils/numbers';
-import { StoreID, VariableListStr } from '@typing/variables';
+import { StoreID, VariableListStr, VariableStore } from '@typing/variables';
 import {
   getFlatInvItems,
   getItemOperations,
@@ -41,9 +46,14 @@ import { isAbilityBlockVisible } from '@content/content-hidden';
 import { isTruthy } from '@utils/type-fixing';
 import { convertToHardcodedLink } from '@content/hardcoded-links';
 import { cloneDeep, isEqual, mergeWith, unionWith, uniqWith } from 'lodash-es';
-import { getEntityLevel } from '@pages/character_sheet/living-entity-utils';
 import { setCalculatedStatsInStore } from '@variables/calculated-stats';
+import { getEntityLevel } from '@utils/entity-utils';
+import { defineDefaultSources, importFromContentPackage } from '@content/content-store';
 
+/**
+ * Inits the op selection tree based on an entity's op data
+ * @param entity - Living entity (character or creature)
+ */
 function defineSelectionTree(entity: LivingEntity) {
   if (entity.operation_data?.selections) {
     setSelections(
@@ -57,7 +67,16 @@ function defineSelectionTree(entity: LivingEntity) {
   }
 }
 
-async function executeOperations(
+/**
+ * Execute a single array of operations for a given source
+ * @param varId - Variable store ID
+ * @param primarySource - Primary source identifier
+ * @param operations - Array of operations to execute
+ * @param options - Operation options
+ * @param sourceLabel - Label for the source (for logging/debugging)
+ * @returns - Array of operation results
+ */
+async function _executeOps(
   varId: StoreID,
   primarySource: string,
   operations: Operation[],
@@ -92,19 +111,27 @@ async function executeOperations(
         - If, in the future, we add a way to execute a list of operations X times, where
           X is based on a value of a variable, those would also need to be run here.
 */
-export async function executeCharacterOperations(
-  character: Character,
-  content: ContentPackage,
-  context: string
-): Promise<OperationCharacterResultPackage> {
+export async function _executeCharacterOperations(data: {
+  character: Character;
+  content: ContentPackage;
+  context: string;
+}): Promise<{
+  store: VariableStore;
+  ors: OperationCharacterResultPackage;
+}> {
+  const { character, content, context } = data;
+
   resetVariables('CHARACTER');
   defineSelectionTree(character);
+  defineDefaultSources('INFO', content.defaultSources.INFO);
+  defineDefaultSources('PAGE', content.defaultSources.PAGE);
+  importFromContentPackage(content);
   setVariable('CHARACTER', 'PAGE_CONTEXT', context);
   setVariable('CHARACTER', 'PATHFINDER', playingPathfinder(character));
   setVariable('CHARACTER', 'STARFINDER', playingStarfinder(character));
   setVariable('CHARACTER', 'ORGANIZED_PLAY', character.options?.organized_play ?? false);
 
-  setVariable('CHARACTER', 'LEVEL', getEntityLevel(character));
+  setVariable('CHARACTER', 'LEVEL', character.level);
 
   setVariable('CHARACTER', 'ACTIVE_MODES', character.meta_data?.active_modes ?? [], 'Loaded');
   const modes = content.abilityBlocks.filter((block) => block.type === 'mode');
@@ -114,29 +141,59 @@ export async function executeCharacterOperations(
   const background = content.backgrounds.find((b) => b.id === character.details?.background?.id);
   const ancestry = content.ancestries.find((a) => a.id === character.details?.ancestry?.id);
 
-  const baseClassTrainings = Math.max(class_?.skill_training_base ?? 0, class_2?.skill_training_base ?? 0);
+  const baseClassTrainings = Math.max(
+    getClassSkillTrainingsNum(class_, character.details?.class_archetype),
+    getClassSkillTrainingsNum(class_2, character.details?.class_archetype_2)
+  );
 
-  const classFeatures_1 = content.abilityBlocks
-    .filter((ab) => ab.type === 'class-feature' && ab.traits?.includes(class_?.trait_id ?? -1))
-    .sort((a, b) => {
-      if (a.level !== undefined && b.level !== undefined) {
-        if (a.level !== b.level) {
-          return a.level - b.level;
+  // Handles getting class features for a class (injecting class archetype changes if needed)
+  const getClassFeatures = (abs: AbilityBlock[], classTraitId: number | undefined, recordT: '1' | '2') => {
+    const ctId = classTraitId ?? Number.MIN_SAFE_INTEGER;
+    let classAbs = cloneDeep(abs.filter((ab) => ab.type === 'class-feature' && ab.traits?.includes(ctId)));
+
+    // Get the class archetype based on recordT
+    let classArchetype: ClassArchetype | null = null;
+    if (recordT === '1' && character.details?.class_archetype) {
+      classArchetype = character.details.class_archetype;
+    } else if (recordT === '2' && character.details?.class_archetype_2) {
+      classArchetype = character.details.class_archetype_2;
+    }
+
+    if (!classArchetype) {
+      return classAbs;
+    } else {
+      // Apply feature adjustments
+      for (const fa of classArchetype.feature_adjustments ?? []) {
+        if (fa.type === 'ADD' && fa.data) {
+          classAbs.push(fa.data);
+        } else if (fa.type === 'REMOVE' && fa.prev_id) {
+          classAbs = classAbs.filter((ab) => ab.id !== fa.prev_id);
+        } else if (fa.type === 'REPLACE' && fa.prev_id && fa.data) {
+          classAbs = classAbs.filter((ab) => ab.id !== fa.prev_id);
+          classAbs.push(fa.data);
         }
       }
-      return a.name.localeCompare(b.name);
-    });
+      return classAbs;
+    }
+  };
 
-  const classFeatures_2 = content.abilityBlocks
-    .filter((ab) => ab.type === 'class-feature' && ab.traits?.includes(class_2?.trait_id ?? -1))
-    .sort((a, b) => {
-      if (a.level !== undefined && b.level !== undefined) {
-        if (a.level !== b.level) {
-          return a.level - b.level;
-        }
+  const classFeatures_1 = getClassFeatures(content.abilityBlocks, class_?.trait_id, '1').sort((a, b) => {
+    if (a.level !== undefined && b.level !== undefined) {
+      if (a.level !== b.level) {
+        return a.level - b.level;
       }
-      return a.name.localeCompare(b.name);
-    });
+    }
+    return a.name.localeCompare(b.name);
+  });
+
+  const classFeatures_2 = getClassFeatures(content.abilityBlocks, class_2?.trait_id, '2').sort((a, b) => {
+    if (a.level !== undefined && b.level !== undefined) {
+      if (a.level !== b.level) {
+        return a.level - b.level;
+      }
+    }
+    return a.name.localeCompare(b.name);
+  });
 
   // Merge both but only keep one if they both have the same name and level
   let classFeatures = unionWith(
@@ -385,7 +442,7 @@ export async function executeCharacterOperations(
               id: `22879f23-5c21-4845-9af0-ae6d8f577601-${index}`,
               type: 'addBonusToValue',
               data: {
-                variable: 'ATTACK_ROLLS_BONUS',
+                variable: 'NON_SPELL_ATTACK_ROLLS_BONUS',
                 text: '',
                 value: `+${bonus}`,
                 type: 'potency',
@@ -620,6 +677,38 @@ export async function executeCharacterOperations(
     classFeatures = [...classFeatures, ...abpSections];
   }
 
+  // Organized Play
+  if (character.options?.organized_play) {
+    const finderType = playingStarfinder(character) ? 'Starfinder' : 'Pathfinder';
+    classFeatures.push({
+      id: hashData({ name: 'organized-play_society-lore' }),
+      created_at: '',
+      operations: [
+        {
+          id: 'd4b56b75-54d2-48e7-887d-08f0336a1f3f',
+          type: 'createValue',
+          data: {
+            variable: `SKILL_LORE_${finderType.toUpperCase()}_SOCIETY`,
+            value: { value: 'U', attribute: 'ATTRIBUTE_INT', increases: 0 },
+            type: 'prof',
+          },
+        },
+        {
+          id: '1025504f-8f2e-48ce-b338-ceb6d71743w9',
+          type: 'adjValue',
+          data: { variable: `SKILL_LORE_${finderType.toUpperCase()}_SOCIETY`, value: { value: 'T' } },
+        },
+      ],
+      name: `${finderType} Society`,
+      actions: null,
+      level: 1,
+      rarity: 'COMMON',
+      description: `All ${finderType} Society characters get free training in ${finderType} Society Lore (sometimes referred to as ${finderType} Lore).`,
+      type: 'class-feature',
+      content_source_id: -1,
+    } satisfies AbilityBlock);
+  }
+
   //
 
   const operationsPassthrough = async (options?: OperationOptions) => {
@@ -628,7 +717,7 @@ export async function executeCharacterOperations(
       baseResults: OperationResult[];
     }[] = [];
     for (const source of content.sources ?? []) {
-      const results = await executeOperations(
+      const results = await _executeOps(
         'CHARACTER',
         `content-source-${source.id}`,
         source.operations ?? [],
@@ -644,20 +733,20 @@ export async function executeCharacterOperations(
       }
     }
 
-    let characterResults = await executeOperations(
+    let characterResults = await _executeOps(
       'CHARACTER',
       'character',
-      character.options?.custom_operations ? character.custom_operations ?? [] : [],
+      character.options?.custom_operations ? (character.custom_operations ?? []) : [],
       options,
       'Custom'
     );
 
     let classResults: OperationResult[] = [];
     if (class_) {
-      classResults = await executeOperations(
+      classResults = await _executeOps(
         'CHARACTER',
         'class',
-        getAdjustedClassOperations('CHARACTER', class_, baseClassTrainings),
+        getTotalClassOperations('CHARACTER', class_, character.details?.class_archetype, baseClassTrainings),
         options,
         class_.name
       );
@@ -666,14 +755,25 @@ export async function executeCharacterOperations(
       // Add class to variables
       adjVariable('CHARACTER', 'CLASS_IDS', `${class_.id}`, undefined);
       adjVariable('CHARACTER', 'CLASS_NAMES', class_.name.toUpperCase(), undefined);
+
+      // Add class archetype to variables
+      if (character.details?.class_archetype) {
+        adjVariable('CHARACTER', 'CLASS_ARCHETYPE_IDS', `${character.details.class_archetype.id}`, undefined);
+        adjVariable(
+          'CHARACTER',
+          'CLASS_ARCHETYPE_NAMES',
+          character.details.class_archetype.name.toUpperCase(),
+          undefined
+        );
+      }
     }
 
     let class2Results: OperationResult[] = [];
     if (class_2) {
-      class2Results = await executeOperations(
+      class2Results = await _executeOps(
         'CHARACTER',
         'class-2',
-        getAdjustedClassOperations('CHARACTER', class_2, null),
+        getTotalClassOperations('CHARACTER', class_2, character.details?.class_archetype_2, null),
         options,
         class_2.name
       );
@@ -688,11 +788,22 @@ export async function executeCharacterOperations(
       // Add class to variables
       adjVariable('CHARACTER', 'CLASS_IDS', `${class_2.id}`, undefined);
       adjVariable('CHARACTER', 'CLASS_NAMES', class_2.name.toUpperCase(), undefined);
+
+      // Add class archetype to variables
+      if (character.details?.class_archetype_2) {
+        adjVariable('CHARACTER', 'CLASS_ARCHETYPE_IDS', `${character.details.class_archetype_2.id}`, undefined);
+        adjVariable(
+          'CHARACTER',
+          'CLASS_ARCHETYPE_NAMES',
+          character.details.class_archetype_2.name.toUpperCase(),
+          undefined
+        );
+      }
     }
 
     let ancestryResults: OperationResult[] = [];
     if (ancestry) {
-      ancestryResults = await executeOperations(
+      ancestryResults = await _executeOps(
         'CHARACTER',
         'ancestry',
         getAdjustedAncestryOperations('CHARACTER', character, getExtendedAncestryOperations('CHARACTER', ancestry)),
@@ -714,7 +825,7 @@ export async function executeCharacterOperations(
 
     let backgroundResults: OperationResult[] = [];
     if (background) {
-      backgroundResults = await executeOperations(
+      backgroundResults = await _executeOps(
         'CHARACTER',
         'background',
         background.operations ?? [],
@@ -735,7 +846,7 @@ export async function executeCharacterOperations(
     if (ancestry) {
       for (const section of getAncestrySections('CHARACTER', ancestry, character.variants?.ancestry_paragon ?? false)) {
         if (section.level === undefined || section.level <= character.level) {
-          const results = await executeOperations(
+          const results = await _executeOps(
             'CHARACTER',
             `ancestry-section-${section.id}`,
             section.operations ?? [],
@@ -757,7 +868,7 @@ export async function executeCharacterOperations(
     }[] = [];
     for (const feature of classFeatures.filter((cf) => isAbilityBlockVisible('CHARACTER', cf))) {
       if (feature.level === undefined || feature.level <= character.level) {
-        const results = await executeOperations(
+        const results = await _executeOps(
           'CHARACTER',
           `class-feature-${feature.id}`,
           feature.operations ?? [],
@@ -791,7 +902,7 @@ export async function executeCharacterOperations(
         continue;
       }
 
-      const results = await executeOperations(
+      const results = await _executeOps(
         'CHARACTER',
         `item-${invItem.item.id}`,
         getItemOperations(invItem.item, content),
@@ -810,7 +921,7 @@ export async function executeCharacterOperations(
     let modeResults: { baseSource: AbilityBlock; baseResults: OperationResult[] }[] = [];
     const activeModes = getVariable<VariableListStr>('CHARACTER', 'ACTIVE_MODES')?.value || [];
     for (const mode of modes.filter((m) => activeModes.includes(labelToVariable(m.name)))) {
-      const results = await executeOperations(
+      const results = await _executeOps(
         'CHARACTER',
         `mode-${mode.id}`,
         mode.operations ?? [],
@@ -862,7 +973,7 @@ export async function executeCharacterOperations(
   const conditionalResults = await operationsPassthrough({
     doOnlyConditionals: true,
     onlyConditionalsWhitelist: [
-      ...(class_ ? addedClassSkillTrainings('CHARACTER', baseClassTrainings) : []).map((op) => op.id),
+      ...(class_ ? getClassSkillTrainings('CHARACTER', baseClassTrainings) : []).map((op) => op.id),
       ...(ancestry ? addedAncestryLanguages('CHARACTER', ancestry) : []).map((op) => op.id),
     ],
   });
@@ -870,16 +981,29 @@ export async function executeCharacterOperations(
   // Set calculated stats
   setCalculatedStatsInStore('CHARACTER', character);
 
-  return mergeOperationResults(results, conditionalResults) as typeof results;
+  return {
+    store: exportVariableStore('CHARACTER'),
+    ors: mergeOperationResults(results, conditionalResults) as typeof results,
+  };
 }
 
-export async function executeCreatureOperations(
-  id: StoreID,
-  creature: Creature,
-  content: ContentPackage
-): Promise<OperationCreatureResultPackage> {
+export async function _executeCreatureOperations(data: {
+  id: StoreID;
+  creature: Creature;
+  content: ContentPackage;
+  charStore: VariableStore;
+}): Promise<{
+  store: VariableStore;
+  ors: OperationCreatureResultPackage;
+}> {
+  const { id, creature, content } = data;
+
   resetVariables(id);
   defineSelectionTree(creature);
+  defineDefaultSources('INFO', content.defaultSources.INFO);
+  defineDefaultSources('PAGE', content.defaultSources.PAGE);
+  importFromContentPackage(content);
+  importVariableStore('CHARACTER', data.charStore);
   setVariable('CHARACTER', 'PAGE_CONTEXT', 'CHARACTER-SHEET');
 
   setVariable(id, 'LEVEL', getEntityLevel(creature));
@@ -894,20 +1018,14 @@ export async function executeCreatureOperations(
   ];
 
   const operationsPassthrough = async (options?: OperationOptions) => {
-    let creatureResults = await executeOperations(id, 'creature', creature.operations ?? [], options, creature.name);
+    let creatureResults = await _executeOps(id, 'creature', creature.operations ?? [], options, creature.name);
 
     let abilityResults: {
       baseSource: AbilityBlock;
       baseResults: OperationResult[];
     }[] = [];
     for (const ability of abilities) {
-      const results = await executeOperations(
-        id,
-        `ability-${ability.id}`,
-        ability.operations ?? [],
-        options,
-        ability.name
-      );
+      const results = await _executeOps(id, `ability-${ability.id}`, ability.operations ?? [], options, ability.name);
 
       abilityResults.push({
         baseSource: ability,
@@ -934,7 +1052,7 @@ export async function executeCreatureOperations(
         continue;
       }
 
-      const results = await executeOperations(
+      const results = await _executeOps(
         id,
         `item-${invItem.item.id}`,
         getItemOperations(invItem.item, content),
@@ -983,7 +1101,10 @@ export async function executeCreatureOperations(
   // Set calculated stats
   setCalculatedStatsInStore(id, creature);
 
-  return mergeOperationResults(results, conditionalResults) as typeof results;
+  return {
+    store: exportVariableStore(id),
+    ors: mergeOperationResults(results, conditionalResults) as typeof results,
+  };
 }
 
 function mergeOperationResults(normal: Record<string, any[]>, conditional: Record<string, any[]>) {
@@ -1108,16 +1229,68 @@ function limitBoostOptions(operations: Operation[], operationResults: OperationR
   return operationResults;
 }
 
-export function getAdjustedClassOperations(varId: StoreID, class_: Class, baseTrainings: number | null) {
-  let classOperations = cloneDeep(class_.operations ?? []);
-
-  if (baseTrainings !== null) {
-    classOperations.push(...addedClassSkillTrainings(varId, baseTrainings));
-  }
+function getTotalClassOperations(
+  varId: StoreID,
+  class_: Class,
+  archetype: ClassArchetype | undefined,
+  baseTrainings: number | null
+) {
+  let classOperations = getClassOperations(class_, archetype);
+  classOperations.push(...getClassSkillTrainings(varId, baseTrainings));
   return classOperations;
 }
 
-export function addedClassSkillTrainings(varId: StoreID, baseTrainings: number): OperationSelect[] {
+/**
+ * Get the total operations for a class, considering archetype overrides
+ * @param class_ - The class to get operations for
+ * @param archetype - The archetype to consider for overrides
+ * @returns - The total operations for the class
+ */
+export function getClassOperations(class_: Class, archetype: ClassArchetype | undefined) {
+  let classOperations = cloneDeep(class_.operations ?? []);
+  if (archetype) {
+    // Override operations if applicable
+    if (archetype.override_class_operations) {
+      classOperations = [];
+    }
+
+    // Add archetype operations
+    classOperations.push(...(archetype.operations ?? []));
+  }
+
+  return classOperations;
+}
+
+/**
+ * Get the number of skill trainings for a class, considering archetype overrides
+ * @param class_ - The class to get skill trainings for
+ * @param archetype - The archetype to consider for overrides
+ * @returns - The number of skill trainings
+ */
+export function getClassSkillTrainingsNum(class_: Class | undefined, archetype: ClassArchetype | undefined): number {
+  let baseTrainings = class_?.skill_training_base ?? 0;
+  if (archetype) {
+    // Override base trainings if applicable
+    if (archetype.override_skill_training_base !== undefined && archetype.override_skill_training_base !== null) {
+      baseTrainings = archetype.override_skill_training_base;
+    }
+  }
+  return baseTrainings;
+}
+
+/**
+ * Generates operations for class skill trainings, adding Int modifier
+ * @param varId - The variable ID for the character
+ * @param baseTrainings - The base number of skill trainings to generate operations for
+ * @returns - An array of OperationSelect for skill trainings
+ */
+export function getClassSkillTrainings(varId: StoreID, baseTrainings: number | null): OperationSelect[] {
+  // If null base trainings, return nothing (don't add Int modifier)
+  // - For things like 2nd class
+  if (baseTrainings === null) {
+    return [];
+  }
+
   let operations: OperationSelect[] = [];
 
   // Operations for adding skill trainings equal to Int attribute modifier

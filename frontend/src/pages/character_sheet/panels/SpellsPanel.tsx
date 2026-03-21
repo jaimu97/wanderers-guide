@@ -1,14 +1,11 @@
-import { characterState } from '@atoms/characterAtoms';
-import { drawerState } from '@atoms/navAtoms';
 import { ActionSymbol } from '@common/Actions';
 import TokenSelect from '@common/TokenSelect';
 import { collectEntitySpellcasting } from '@content/collect-content';
-import { fetchContentAll } from '@content/content-store';
+import { fetchContentAll, getContentFast, getDefaultSources } from '@content/content-store';
 import {
   Accordion,
   ActionIcon,
   Box,
-  CloseButton,
   Group,
   HoverCard,
   ScrollArea,
@@ -19,7 +16,7 @@ import {
 } from '@mantine/core';
 import ManageSpellsModal from '@modals/ManageSpellsModal';
 import { isCantrip } from '@spells/spell-utils';
-import { IconSearch, IconSquareRounded, IconSquareRoundedFilled } from '@tabler/icons-react';
+import { IconSearch, IconSquareRounded, IconSquareRoundedFilled, IconX } from '@tabler/icons-react';
 import { useQuery } from '@tanstack/react-query';
 import {
   ActionCost,
@@ -30,22 +27,25 @@ import {
   SpellListEntry,
   SpellSectionType,
   SpellSlot,
+  Trait,
 } from '@typing/content';
 import useRefresh from '@utils/use-refresh';
-import * as JsSearch from 'js-search';
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { SetterOrUpdater, useRecoilState, useRecoilValue } from 'recoil';
+import { useEffect, useMemo, useState } from 'react';
+import { SetterOrUpdater } from 'recoil';
 import FocusSpellsList from './spells_list/FocusSpellsList';
 import InnateSpellsList from './spells_list/InnateSpellsList';
 import PreparedSpellsList from './spells_list/PreparedSpellsList';
 import RitualSpellsList from './spells_list/RitualSpellsList';
 import SpontaneousSpellsList from './spells_list/SpontaneousSpellsList';
 import StaffSpellsList from './spells_list/StaffSpellsList';
-import { filterByTraitType, handleUpdateItemCharges } from '@items/inv-utils';
 import WandSpellsList from './spells_list/WandSpellsList';
+import SpellheartSpellsList from './spells_list/SpellheartSpellsList';
+import { filterByTraitType } from '@items/inv-utils';
 import { StoreID } from '@typing/variables';
 import { isTruthy } from '@utils/type-fixing';
 import { groupBy } from 'lodash-es';
+import { phoneQuery } from '@utils/mobile-responsive';
+import { useDebouncedValue, useMediaQuery } from '@mantine/hooks';
 
 export default function SpellsPanel(props: {
   id: StoreID;
@@ -55,16 +55,18 @@ export default function SpellsPanel(props: {
   panelWidth: number;
   zIndex?: number;
 }) {
+  const isPhone = useMediaQuery(phoneQuery());
   const theme = useMantineTheme();
   const [searchQuery, setSearchQuery] = useState('');
-  const [_drawer, openDrawer] = useRecoilState(drawerState);
+  const [searchQueryDebounced] = useDebouncedValue(searchQuery, 200);
   const [manageSpells, setManageSpells] = useState<
     | {
         source: string;
         type: 'SLOTS-ONLY' | 'SLOTS-AND-LIST' | 'LIST-ONLY';
         filter?: {
           traditions?: string[];
-          ranks?: string[];
+          rank_min?: number;
+          rank_max?: number;
         };
       }
     | undefined
@@ -75,7 +77,7 @@ export default function SpellsPanel(props: {
     queryFn: async () => {
       if (!props.entity) return null;
 
-      return await fetchContentAll<Spell>('spell');
+      return await fetchContentAll<Spell>('spell', getDefaultSources('PAGE'));
     },
   });
 
@@ -84,27 +86,43 @@ export default function SpellsPanel(props: {
     return collectEntitySpellcasting(props.id, props.entity);
   }, [props.entity]);
 
-  // Filter options based on search query
-  const search = useRef(new JsSearch.Search('id'));
-  useEffect(() => {
-    if (!spells) return;
-    search.current.addIndex('name');
-    search.current.addIndex('description');
-    search.current.addIndex('duration');
-    search.current.addIndex('targets');
-    search.current.addIndex('area');
-    search.current.addIndex('range');
-    search.current.addIndex('requirements');
-    search.current.addIndex('trigger');
-    search.current.addIndex('cost');
-    search.current.addIndex('defense');
-    search.current.addDocuments(spells);
-  }, [spells]);
-
   // Filter spells by action cost
   const [actionTypeFilter, setActionTypeFilter] = useState<ActionCost | 'ALL'>('ALL');
 
-  const searchSpells = searchQuery.trim() ? (search.current?.search(searchQuery.trim()) as Spell[]) : spells ?? [];
+  const searchSpells = useMemo(() => {
+    // Filter spells
+    return searchQueryDebounced.trim() || actionTypeFilter !== 'ALL'
+      ? (spells ?? []).filter((s) => {
+          // Custom search, alt could be to use JsSearch here
+          const query = searchQueryDebounced.trim().toLowerCase();
+
+          const checkSpell = (spell: Spell) => {
+            if (actionTypeFilter !== 'ALL') return false;
+
+            const searchStr = JSON.stringify({
+              _: spell.name,
+              __: spell.duration,
+              ___: spell.targets,
+              ____: spell.area,
+              _____: spell.range,
+              ______: spell.requirements,
+              _______: spell.trigger,
+              ________: spell.cost,
+              _________: spell.defense,
+              __________: spell.cast,
+              ___________: spell.rarity,
+              _____________: getContentFast<Trait>('trait', spell.traits ?? []).map((t) => t.name),
+            }).toLowerCase();
+
+            return searchStr.includes(query);
+          };
+
+          if (checkSpell(s)) return true;
+          return false;
+        })
+      : (spells ?? []);
+  }, [spells, actionTypeFilter, searchQueryDebounced]);
+
   const allSpells = searchSpells.filter((spell) => spell.cast === actionTypeFilter || actionTypeFilter === 'ALL');
   const hasFilters = searchQuery.trim().length > 0 || actionTypeFilter !== 'ALL';
 
@@ -114,16 +132,25 @@ export default function SpellsPanel(props: {
         <Group>
           <TextInput
             style={{ flex: 1 }}
-            leftSection={<IconSearch size='0.9rem' />}
+            leftSection={isPhone ? undefined : <IconSearch size='0.9rem' />}
             placeholder={`Search spells`}
             value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
+            onChange={(e) => setSearchQuery(e.target.value)}
             rightSection={
-              <CloseButton
-                aria-label='Clear input'
-                onClick={() => setSearchQuery('')}
-                style={{ display: searchQuery.trim() ? undefined : 'none' }}
-              />
+              searchQuery.trim() ? (
+                <ActionIcon
+                  variant='subtle'
+                  size='md'
+                  color='gray'
+                  radius='xl'
+                  aria-label='Clear search'
+                  onClick={() => {
+                    setSearchQuery('');
+                  }}
+                >
+                  <IconX size='1.2rem' stroke={2} />
+                </ActionIcon>
+              ) : undefined
             }
             styles={{
               input: {
@@ -283,6 +310,20 @@ export default function SpellsPanel(props: {
                   spellIds={[]}
                   allSpells={allSpells}
                   type='WAND'
+                  hasFilters={hasFilters}
+                  extra={{ charData: charData }}
+                />
+              )}
+              {filterByTraitType(props.entity?.inventory?.items ?? [], 'SPELLHEART').length > 0 && (
+                <SpellList
+                  id={props.id}
+                  entity={props.entity}
+                  setEntity={props.setEntity}
+                  //
+                  index={'spellheart'}
+                  spellIds={[]}
+                  allSpells={allSpells}
+                  type='SPELLHEART'
                   hasFilters={hasFilters}
                   extra={{ charData: charData }}
                 />
@@ -464,7 +505,8 @@ function SpellList(props: {
     type: 'SLOTS-ONLY' | 'SLOTS-AND-LIST' | 'LIST-ONLY',
     filter?: {
       traditions?: string[];
-      ranks?: string[];
+      rank_min?: number;
+      rank_max?: number;
     }
   ) => void;
 }) {
@@ -721,6 +763,17 @@ function SpellList(props: {
     );
   }
 
+  if (props.type === 'SPELLHEART' && props.entity) {
+    return (
+      <SpellheartSpellsList
+        {...props}
+        spellhearts={filterByTraitType(props.entity?.inventory?.items ?? [], 'SPELLHEART')}
+        entity={props.entity}
+        setEntity={props.setEntity}
+      />
+    );
+  }
+
   if (props.type === 'RITUAL') {
     return <RitualSpellsList {...props} spells={spells} castSpell={castSpell} />;
   }
@@ -745,6 +798,7 @@ export function SpellSlotSelect(props: { current: number; max: number; onChange:
               value={props.current}
               onChange={props.onChange}
               size='xs'
+              invertedSelect
               emptySymbol={
                 <ActionIcon
                   variant='transparent'

@@ -1,6 +1,6 @@
-import { Character } from "@typing/content";
+import { Character } from '@typing/content';
 
-export function isPlayable(character?: Character | null){
+export function isPlayable(character?: Character | null) {
   if (!character) return false;
   return !!(
     character.level > 0 &&

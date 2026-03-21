@@ -18,23 +18,16 @@ import {
   OperationGiveTrait,
   OperationInjectSelectOption,
   OperationInjectText,
+  OperationOptions,
   OperationRemoveAbilityBlock,
   OperationRemoveLanguage,
   OperationRemoveSpell,
+  OperationResult,
   OperationSelect,
   OperationSendNotification,
   OperationSetValue,
 } from '@typing/operations';
-import {
-  ExtendedProficiencyType,
-  ExtendedProficiencyValue,
-  ProficiencyType,
-  ProficiencyValue,
-  StoreID,
-  VariableNum,
-  VariableProf,
-} from '@typing/variables';
-import { displayError, throwError } from '@utils/notifications';
+import { ProficiencyType, StoreID, VariableNum, VariableProf } from '@typing/variables';
 import {
   addVariable,
   addVariableBonus,
@@ -43,12 +36,7 @@ import {
   getVariables,
   setVariable,
 } from '@variables/variable-manager';
-import {
-  compileExpressions,
-  compileProficiencyType,
-  labelToVariable,
-  maxProficiencyType,
-} from '@variables/variable-utils';
+import { compileProficiencyType, labelToVariable, maxProficiencyType } from '@variables/variable-utils';
 import {
   ObjectWithUUID,
   determineFilteredSelectionList,
@@ -57,28 +45,25 @@ import {
 } from './operation-utils';
 import { SelectionTrack } from './selection-tree';
 import { isEqual } from 'lodash-es';
-import { hideNotification, showNotification } from '@mantine/notifications';
+import { throwError } from '@utils/error-handling';
 
-export type OperationOptions = {
-  doOnlyValueCreation?: boolean;
-  doConditionals?: boolean;
-  doOnlyConditionals?: boolean;
-  onlyConditionalsWhitelist?: string[];
-};
+// import { hideNotification, showNotification } from '@mantine/notifications';
+// import { displayError } from '@utils/notifications';
+// Disable these for now as we move to web worker processing for operations
 
-export type OperationResult = {
-  selection?: {
-    id: string;
-    title?: string;
-    description?: string;
-    options: ObjectWithUUID[];
-    skillAdjustment?: ExtendedProficiencyType;
-  };
-  result?: {
-    source?: ObjectWithUUID;
-    results: OperationResult[];
-  };
-} | null;
+function hideNotification(id: string) {
+  console.log(`WEB WORKER MOCK > Hide notification: ${id}`);
+}
+
+function showNotification(options: any) {
+  console.log(`WEB WORKER MOCK > Show notification: ${JSON.stringify(options)}`);
+}
+
+function displayError(message: string, debugOnly?: boolean) {
+  console.log(`WEB WORKER MOCK > Display error: ${message}, debugOnly: ${debugOnly}`);
+}
+
+///
 
 export async function runOperations(
   varId: StoreID,
@@ -286,7 +271,7 @@ async function runSelect(
           { path: `${selectionTrack.path}_${subNode?.value}`, node: subNode },
           subOperations,
           options,
-          operation.data.optionType === 'CUSTOM' ? sourceLabel : selectedOption.name ?? 'Unknown'
+          operation.data.optionType === 'CUSTOM' ? sourceLabel : (selectedOption.name ?? 'Unknown')
         );
       }
     }

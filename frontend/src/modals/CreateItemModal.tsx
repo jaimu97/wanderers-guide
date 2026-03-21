@@ -4,9 +4,11 @@ import TraitsInput from '@common/TraitsInput';
 import { OperationSection } from '@common/operations/Operations';
 import RichTextInput from '@common/rich_text_input/RichTextInput';
 import { selectContent } from '@common/select/SelectContent';
-import { DISCORD_URL, EDIT_MODAL_HEIGHT } from '@constants/data';
+import { EDIT_MODAL_HEIGHT } from '@constants/data';
+import { DISCORD_URL } from '@constants/urls';
 import { fetchContentById, fetchTraits } from '@content/content-store';
 import { toHTML } from '@content/content-utils';
+import { isItemFundamentalRune } from '@items/inv-utils';
 import {
   Accordion,
   ActionIcon,
@@ -726,6 +728,7 @@ export function CreateItemModal(props: {
                                   { value: '2', label: '+2 Potency' },
                                   { value: '3', label: '+3 Potency' },
                                   { value: '4', label: '+4 Potency' },
+                                  { value: '10', label: 'Mythic P.' },
                                 ]}
                                 value={potencyRune !== undefined ? `${potencyRune}` : undefined}
                                 onChange={(value) => {
@@ -739,6 +742,7 @@ export function CreateItemModal(props: {
                                   { value: '1', label: 'Striking' },
                                   { value: '2', label: 'Greater S.' },
                                   { value: '3', label: 'Major S.' },
+                                  { value: '10', label: 'Mythic S.' },
                                 ]}
                                 value={strikingRune !== undefined ? `${strikingRune}` : undefined}
                                 onChange={(value) => {
@@ -753,6 +757,7 @@ export function CreateItemModal(props: {
                                   { value: '1', label: 'Resilient' },
                                   { value: '2', label: 'Greater R.' },
                                   { value: '3', label: 'Major R.' },
+                                  { value: '10', label: 'Mythic R.' },
                                 ]}
                                 value={resilientRune !== undefined ? `${resilientRune}` : undefined}
                                 onChange={(value) => {
@@ -766,12 +771,11 @@ export function CreateItemModal(props: {
                               placeholder='(limited to potency rune #)'
                               valueName={propertyRunes?.map((rune) => rune.name)}
                               filter={(item) => {
-                                return item.group === 'RUNE';
+                                return item.group === 'RUNE' && !isItemFundamentalRune(item);
                               }}
-                              onChange={(items, names) => {
-                                console.log('items', items, names);
-
-                                if ((items ?? []).length > (potencyRune ?? 0)) {
+                              onChange={(items, _names) => {
+                                const cap = Math.min(potencyRune ?? 0, 4);
+                                if ((items ?? []).length > cap) {
                                   return;
                                 }
                                 setPropertyRunes(
@@ -804,8 +808,6 @@ export function CreateItemModal(props: {
                                 return item.group === 'UPGRADE';
                               }}
                               onChange={(items, names) => {
-                                console.log('items', items, names);
-
                                 // if ((items ?? []).length > (grade ?? 0)) {
                                 //   return;
                                 // }
@@ -860,7 +862,6 @@ export function CreateItemModal(props: {
                                     },
                                     {
                                       showButton: true,
-                                      groupBySource: true,
                                     }
                                   );
                                 }}
@@ -1066,6 +1067,7 @@ export function CreateItemModal(props: {
                   setDescription(json);
                   form.setFieldValue('description', text);
                 }}
+                maxHeight={500}
               />
             )}
 

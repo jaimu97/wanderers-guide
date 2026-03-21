@@ -1,7 +1,7 @@
 import { Item } from '@typing/content';
 import { StoreID, VariableBool, VariableListStr, VariableNum, VariableProf } from '@typing/variables';
 import { hasTraitType } from '@utils/traits';
-import { getFinalProfValue, getFinalVariableValue } from '@variables/variable-display';
+import { getFinalProfValue, getFinalVariableValue } from '@variables/variable-helpers';
 import { getVariable } from '@variables/variable-manager';
 import { compileProficiencyType, labelToVariable } from '@variables/variable-utils';
 import { compileTraits, getGradeImprovements, isItemRangedWeapon } from './inv-utils';
@@ -24,7 +24,9 @@ export function getWeaponStats(id: StoreID, item: Item) {
 
   // Get the number of dice for the weapon
   let dice =
-    (item.meta_data?.damage?.dice ?? 1) + (item.meta_data?.runes?.striking ?? 0) + (gradeImprovements.damage_dice - 1);
+    (item.meta_data?.damage?.dice ?? 1) +
+    Math.min(item.meta_data?.runes?.striking ?? 0, 4) +
+    (gradeImprovements.damage_dice - 1);
   const minDice = getVariable<VariableNum>(id, 'MINIMUM_WEAPON_DAMAGE_DICE')?.value ?? 1;
   if (dice < minDice) dice = minDice;
 
@@ -134,7 +136,10 @@ function getRangedAttackBonus(id: StoreID, item: Item) {
   }
 
   if (item.meta_data?.runes?.potency) {
-    parts.set("This is the bonus you receive from the weapon's potency rune.", item.meta_data.runes.potency);
+    parts.set(
+      "This is the bonus you receive from the weapon's potency rune.",
+      Math.min(item.meta_data.runes.potency, 4)
+    );
   }
 
   if (attackBonus) {
@@ -186,6 +191,7 @@ function getMeleeAttackBonus(id: StoreID, item: Item) {
   const dexAttackBonus = getFinalVariableValue(id, 'DEX_ATTACK_ROLLS_BONUS').total;
   const strAttackBonus = getFinalVariableValue(id, 'STR_ATTACK_ROLLS_BONUS').total;
   const meleeAttackBonus = getFinalVariableValue(id, 'MELEE_ATTACK_ROLLS_BONUS').total;
+  const nonSpellAttackBonus = getFinalVariableValue(id, 'NON_SPELL_ATTACK_ROLLS_BONUS').total;
   const extraItemBonus = item.meta_data?.attack_bonus ?? 0;
 
   const hasFinesse = hasTraitType('FINESSE', itemTraits);
@@ -218,7 +224,10 @@ function getMeleeAttackBonus(id: StoreID, item: Item) {
   }
 
   if (item.meta_data?.runes?.potency) {
-    parts.set("This is the bonus you receive from the weapon's potency rune.", item.meta_data.runes.potency);
+    parts.set(
+      "This is the bonus you receive from the weapon's potency rune.",
+      Math.min(item.meta_data.runes.potency, 4)
+    );
   }
 
   if (attackBonus) {
@@ -237,6 +246,10 @@ function getMeleeAttackBonus(id: StoreID, item: Item) {
 
   if (meleeAttackBonus) {
     parts.set('This is a bonus you receive to melee attack rolls.', meleeAttackBonus);
+  }
+
+  if (nonSpellAttackBonus) {
+    parts.set('This is a bonus you receive to non-spell attack rolls.', nonSpellAttackBonus);
   }
 
   if (extraItemBonus) {
@@ -385,6 +398,7 @@ function getMeleeAttackDamage(id: StoreID, item: Item) {
   const dexAttackDamage = getFinalVariableValue(id, 'DEX_ATTACK_DAMAGE_BONUS').total;
   const strAttackDamage = getFinalVariableValue(id, 'STR_ATTACK_DAMAGE_BONUS').total;
   const meleeAttackDamage = getFinalVariableValue(id, 'MELEE_ATTACK_DAMAGE_BONUS').total;
+  const nonSpellAttackDamage = getFinalVariableValue(id, 'NON_SPELL_ATTACK_DAMAGE_BONUS').total;
 
   const hasSplash = hasTraitType('SPLASH', itemTraits);
   const hasFinesse = hasTraitType('FINESSE', itemTraits);
@@ -437,6 +451,10 @@ function getMeleeAttackDamage(id: StoreID, item: Item) {
 
   if (meleeAttackDamage) {
     parts.set('This is a bonus you receive to damage for melee attacks.', meleeAttackDamage);
+  }
+
+  if (nonSpellAttackDamage) {
+    parts.set('This is a bonus you receive to damage for non-spell attacks.', nonSpellAttackDamage);
   }
 
   // Weapon Specialization

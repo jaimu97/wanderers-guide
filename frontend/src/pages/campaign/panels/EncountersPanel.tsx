@@ -1,4 +1,4 @@
-import { drawerState } from '@atoms/navAtoms';
+import { creatureDrawerState, drawerState } from '@atoms/navAtoms';
 import { sessionState } from '@atoms/supabaseAtoms';
 import { EllipsisText } from '@common/EllipsisText';
 import { Icon } from '@common/Icon';
@@ -6,9 +6,7 @@ import { DisplayIcon } from '@common/IconDisplay';
 import { selectContent } from '@common/select/SelectContent';
 import { applyConditions } from '@conditions/condition-handler';
 import { GUIDE_BLUE } from '@constants/data';
-import { fetchContentPackage } from '@content/content-store';
-import { defineDefaultSourcesForUser } from '@content/homebrew';
-import { CREATURE_DRAWER_ZINDEX } from '@drawers/types/CreatureDrawer';
+import { defineDefaultSources, fetchContentPackage, getDefaultSources } from '@content/content-store';
 import { getBestArmor } from '@items/inv-utils';
 import {
   Tabs,
@@ -30,8 +28,8 @@ import {
 import { getHotkeyHandler, useHover, useMediaQuery } from '@mantine/hooks';
 import { openContextModal } from '@mantine/modals';
 import { CreateCombatantModal } from '@modals/CreateCombatantModal';
-import { executeCreatureOperations } from '@operations/operation-controller';
-import { confirmHealth, getEntityLevel } from '@pages/character_sheet/living-entity-utils';
+import { executeOperations } from '@operations/operations.main';
+import { confirmHealth } from '@pages/character_sheet/entity-handler';
 import { ConditionPills, selectCondition } from '@pages/character_sheet/sections/ConditionSection';
 import { makeRequest } from '@requests/request-manager';
 import {
@@ -48,12 +46,13 @@ import {
 } from '@tabler/icons-react';
 import { useQuery } from '@tanstack/react-query';
 import { Campaign, Character, Combatant, Creature, Encounter, LivingEntity } from '@typing/content';
+import { getEntityLevel } from '@utils/entity-utils';
 import { isPhoneSized, phoneQuery } from '@utils/mobile-responsive';
 import { sign } from '@utils/numbers';
 import { rollDie } from '@utils/random';
 import { isCharacter, isCreature, setterOrUpdaterToValue } from '@utils/type-fixing';
 import useRefresh from '@utils/use-refresh';
-import { getFinalAcValue, getFinalHealthValue, getFinalProfValue } from '@variables/variable-display';
+import { getFinalAcValue, getFinalHealthValue, getFinalProfValue } from '@variables/variable-helpers';
 import { cloneDeep, debounce, isEqual, mean, truncate } from 'lodash-es';
 import { evaluate } from 'mathjs';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -84,10 +83,10 @@ export default function EncountersPanel(props: {
       });
 
       // Prefetch content package for creature calculations
-      await defineDefaultSourcesForUser().then(() => {
-        // We could await fetch content for a more seemless experience but it takes a bit too long imo - Quzzar
-        fetchContentPackage(undefined, { fetchSources: false, fetchCreatures: false });
-      });
+
+      const sv = defineDefaultSources('PAGE', 'ALL-USER-ACCESSIBLE');
+      // We could await fetch content for a more seemless experience but it takes a bit too long imo - Quzzar
+      fetchContentPackage(sv, { fetchSources: false, fetchCreatures: false });
 
       return result ?? [];
     },
@@ -707,7 +706,6 @@ function EncounterView(props: {
                     },
                     {
                       showButton: true,
-                      groupBySource: true,
                       zIndex: 400,
                       // Hide companions
                       filterFn: (c) => c.level !== -100,
@@ -891,7 +889,7 @@ function CombatantCard(props: {
   const isPhone = useMediaQuery(phoneQuery());
   const { hovered, ref } = useHover();
 
-  const [_drawer, openDrawer] = useRecoilState(drawerState);
+  const [_creatureDrawer, openCreatureDrawer] = useRecoilState(creatureDrawerState);
 
   // Initiative
 
@@ -920,7 +918,7 @@ function CombatantCard(props: {
   useEffect(() => {
     if (props.combatant.data) {
       const currentHealth =
-        props.combatant.data.hp_current === undefined ? props.computed?.maxHp ?? 0 : props.combatant.data.hp_current;
+        props.combatant.data.hp_current === undefined ? (props.computed?.maxHp ?? 0) : props.combatant.data.hp_current;
       setHealth(`${currentHealth}` === 'null' ? `${props.computed?.maxHp ?? ''}` : `${currentHealth}`);
     }
   }, [props.combatant, props.computed]);
@@ -997,12 +995,10 @@ function CombatantCard(props: {
           if (props.combatant.type === 'CHARACTER') {
             window.open(`/sheet/${props.combatant.character}`, '_blank');
           } else if (props.combatant.type === 'CREATURE') {
-            openDrawer({
-              type: 'creature',
+            openCreatureDrawer({
               data: {
                 STORE_ID: getCombatantStoreID(props.combatant),
                 creature: props.combatant.creature!,
-                zIndex: CREATURE_DRAWER_ZINDEX,
                 updateCreature: (creature: Creature) => {
                   props.updateEntity(creature);
                 },
@@ -1183,7 +1179,7 @@ function CombatantCard(props: {
 }
 
 async function computeCombatants(combatants: PopulatedCombatant[]) {
-  const content = await fetchContentPackage(undefined, { fetchSources: false, fetchCreatures: false });
+  const content = await fetchContentPackage(getDefaultSources('PAGE'), { fetchSources: false, fetchCreatures: false });
 
   async function computeCombatant(combatant: PopulatedCombatant): Promise<{
     _id: string;
@@ -1212,7 +1208,14 @@ async function computeCombatants(combatants: PopulatedCombatant[]) {
       // Variable store ID
       const STORE_ID = getCombatantStoreID(combatant);
 
-      await executeCreatureOperations(STORE_ID, creature, content);
+      await executeOperations({
+        type: 'CREATURE',
+        data: {
+          id: STORE_ID,
+          creature,
+          content,
+        },
+      });
       // Apply conditions after everything else
       applyConditions(STORE_ID, creature.details?.conditions ?? []);
 

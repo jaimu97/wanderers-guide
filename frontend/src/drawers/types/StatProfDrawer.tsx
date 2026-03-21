@@ -1,7 +1,7 @@
 import { drawerState } from '@atoms/navAtoms';
 import RichText from '@common/RichText';
 import { ActionSelectionOption } from '@common/select/SelectContent';
-import { fetchContentAll } from '@content/content-store';
+import { fetchContentAll, getDefaultSources } from '@content/content-store';
 import { convertToHardcodedLink } from '@content/hardcoded-links';
 import {
   Title,
@@ -30,7 +30,8 @@ import { AbilityBlock } from '@typing/content';
 import { StoreID, VariableBool, VariableProf } from '@typing/variables';
 import { sign } from '@utils/numbers';
 import { toLabel } from '@utils/strings';
-import { displayFinalProfValue, getBonusText, getProfValueParts } from '@variables/variable-display';
+import { displayFinalProfValue } from '@variables/variable-display';
+import { getBonusText, getProfValueParts } from '@variables/variable-helpers';
 import { getVariable, getVariableBonuses, getVariableHistory } from '@variables/variable-manager';
 import {
   compileProficiencyType,
@@ -106,7 +107,7 @@ export function StatProfDrawerContent(props: { data: { id: StoreID; variableName
 
   return (
     <Box>
-      <Accordion variant='separated' defaultValue=''>
+      <Accordion variant='separated' defaultValue='description'>
         <Accordion.Item value='description'>
           <Accordion.Control icon={<IconBlockquote size='1rem' />}>Description</Accordion.Control>
           <Accordion.Panel>
@@ -422,7 +423,7 @@ function SkillActionsSection(props: { variableName: string }) {
       // @ts-ignore
       // eslint-disable-next-line
       const [_key, { variableName }] = queryKey;
-      const abilityBlocks = await fetchContentAll<AbilityBlock>('ability-block');
+      const abilityBlocks = await fetchContentAll<AbilityBlock>('ability-block', getDefaultSources('PAGE'));
       return abilityBlocks.filter((block) => {
         if (!block.meta_data?.skill) return false;
         if (block.type !== 'action') return false;

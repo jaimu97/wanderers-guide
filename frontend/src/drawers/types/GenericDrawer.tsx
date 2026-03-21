@@ -1,27 +1,12 @@
-import { ActionSymbol } from '@common/Actions';
-import IndentedText from '@common/IndentedText';
 import RichText from '@common/RichText';
-import TraitsDisplay from '@common/TraitsDisplay';
-import { TEXT_INDENT_AMOUNT } from '@constants/data';
-import { fetchContentById } from '@content/content-store';
 import ShowOperationsButton from '@drawers/ShowOperationsButton';
-import { Title, Text, Image, Loader, Group, Divider, Stack, Box, Flex, Button } from '@mantine/core';
-import { useQuery } from '@tanstack/react-query';
-import { AbilityBlock } from '@typing/content';
-import { Operation } from '@typing/operations';
+import { Title, Group, Box, Button } from '@mantine/core';
 import { DisplayOperationSelectionOptions } from './ActionDrawer';
 import { drawerState } from '@atoms/navAtoms';
 import { useRecoilState } from 'recoil';
 import { toLabel } from '@utils/strings';
-import { DisplayIcon } from '@common/IconDisplay';
+import { GenericData } from '@typing/index';
 
-export type GenericData = {
-  title: string;
-  description: string;
-  operations?: Operation[];
-  showOperations?: boolean;
-  onSelect?: () => void;
-};
 export function GenericDrawerTitle(props: { data: GenericData }) {
   const [_drawer, openDrawer] = useRecoilState(drawerState);
 

@@ -1,5 +1,4 @@
 import D20Loader from '@assets/images/D20Loader';
-import { characterState } from '@atoms/characterAtoms';
 import BlurBox from '@common/BlurBox';
 import { defineDefaultSources, fetchContentPackage, fetchContentSources } from '@content/content-store';
 
@@ -35,8 +34,8 @@ import {
   IconShadow,
   IconX,
 } from '@tabler/icons-react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Character, ContentPackage, Inventory } from '@typing/content';
+import { useQuery } from '@tanstack/react-query';
+import { Character, ContentPackage, LivingEntity } from '@typing/content';
 import { VariableListStr } from '@typing/variables';
 import { setPageTitle } from '@utils/document-change';
 import { isPhoneSized, phoneQuery, tabletQuery } from '@utils/mobile-responsive';
@@ -44,7 +43,7 @@ import { toLabel } from '@utils/strings';
 import { getVariable } from '@variables/variable-manager';
 import { Suspense, lazy, useEffect, useMemo, useState } from 'react';
 import { useLoaderData } from 'react-router-dom';
-import { useRecoilState } from 'recoil';
+import { SetterOrUpdater } from 'recoil';
 import CompanionsPanel from './panels/CompanionsPanel';
 import DetailsPanel from './panels/DetailsPanel';
 import ExtrasPanel from './panels/ExtrasPanel';
@@ -65,9 +64,13 @@ import { convertToSetEntity } from '@utils/type-fixing';
 import ModesDrawer from '@common/modes/ModesDrawer';
 import CampaignDrawer from '@pages/campaign/CampaignDrawer';
 import useCharacter from '@utils/use-character';
+import { getAnchorStyles } from '@utils/anchor';
+import { AnimatePresence, motion } from 'framer-motion';
 
 export function Component(props: {}) {
-  setPageTitle(`Sheet`);
+  useEffect(() => {
+    setPageTitle(`Sheet`);
+  }, []);
 
   const { characterId } = useLoaderData() as {
     characterId: string;
@@ -83,13 +86,13 @@ export function Component(props: {}) {
       const character = await makeRequest<Character>('find-character', {
         id: characterId,
       });
-      defineDefaultSources(character?.content_sources?.enabled);
+      const sv = defineDefaultSources('PAGE', character?.content_sources?.enabled ?? []);
 
       // Prefetch content sources (to avoid multiple requests)
-      await fetchContentSources({ includeCommonCore: true });
+      await fetchContentSources(sv);
 
       // Fetch content
-      const content = await fetchContentPackage(undefined, { fetchSources: true });
+      const content = await fetchContentPackage(sv, { fetchSources: true });
       return content;
     },
     refetchOnWindowFocus: false,
@@ -114,7 +117,13 @@ export function Component(props: {}) {
         justifyContent: 'center',
       }}
     >
-      <D20Loader size={100} color={theme.colors[theme.primaryColor][5]} percentage={percentage} status='Loading...' />
+      <D20Loader
+        size={100}
+        color={theme.colors[theme.primaryColor][5]}
+        percentage={percentage}
+        status='Loading...'
+        hasStatusBg
+      />
     </Box>
   );
 
@@ -148,11 +157,14 @@ function CharacterSheetInner(props: { content: ContentPackage; characterId: numb
   const panelHeight = height > 800 ? 555 : 500;
   const [hideSections, setHideSections] = useState(false);
 
-  const { character, setCharacter, inventory, setInventory, isLoaded, saveCharacter } = useCharacter(
-    props.characterId,
-    props.content,
-    props.onFinishLoading
-  );
+  const { character, setCharacter, isLoading, saveCharacter } = useCharacter(props.characterId, {
+    type: 'EXECUTE_OPS',
+    data: {
+      content: props.content,
+      context: 'CHARACTER-SHEET',
+      onFinishLoading: props.onFinishLoading,
+    },
+  });
 
   setPageTitle(character && character.name.trim() ? character.name : 'Sheet');
 
@@ -165,7 +177,7 @@ function CharacterSheetInner(props: { content: ContentPackage; characterId: numb
     const givenModeIds = getVariable<VariableListStr>('CHARACTER', 'MODE_IDS')?.value || [];
     return props.content.abilityBlocks.filter((block) => block.type === 'mode' && givenModeIds.includes(block.id + ''));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [character, isLoaded, props.content]);
+  }, [character, isLoading, props.content]);
 
   return (
     <Center>
@@ -184,16 +196,16 @@ function CharacterSheetInner(props: { content: ContentPackage; characterId: numb
                   <HealthSection id='CHARACTER' entity={character} setEntity={convertToSetEntity(setCharacter)} />
                   <ConditionSection id='CHARACTER' entity={character} setEntity={convertToSetEntity(setCharacter)} />
                   <AttributeSection id='CHARACTER' entity={character} setEntity={convertToSetEntity(setCharacter)} />
-                  <ArmorSection id='CHARACTER' inventory={inventory} setInventory={setInventory} />
+                  <ArmorSection id='CHARACTER' entity={character} setEntity={convertToSetEntity(setCharacter)} />
                   <SpeedSection id='CHARACTER' entity={character} setEntity={convertToSetEntity(setCharacter)} />
                 </>
               )}
             </SimpleGrid>
             <SectionPanels
               content={props.content}
-              inventory={inventory}
-              setInventory={setInventory}
-              isLoaded={isLoaded}
+              entity={character}
+              setEntity={convertToSetEntity(setCharacter)}
+              isLoaded={!isLoading}
               panelHeight={panelHeight}
               panelWidth={panelWidth}
               hideSections={hideSections}
@@ -202,13 +214,7 @@ function CharacterSheetInner(props: { content: ContentPackage; characterId: numb
           </Stack>
         </Box>
       </Box>
-      <Box
-        style={{
-          position: 'fixed',
-          bottom: 20,
-          left: 20,
-        }}
-      >
+      <Box style={getAnchorStyles({ l: 20, b: 20 })}>
         <Stack>
           {modes.length > 0 && (
             <Indicator disabled={activeModes.length === 0} label={activeModes.length} size={14} offset={4}>
@@ -258,8 +264,8 @@ function CharacterSheetInner(props: { content: ContentPackage; characterId: numb
 
 function SectionPanels(props: {
   content: ContentPackage;
-  inventory: Inventory;
-  setInventory: React.Dispatch<React.SetStateAction<Inventory>>;
+  entity: LivingEntity | null;
+  setEntity: SetterOrUpdater<LivingEntity | null>;
   isLoaded: boolean;
   hideSections: boolean;
   onHideSections: (hide: boolean) => void;
@@ -269,7 +275,6 @@ function SectionPanels(props: {
   const theme = useMantineTheme();
   const isPhone = isPhoneSized(props.panelWidth);
 
-  const [character, setCharacter] = useRecoilState(characterState);
   const [openedPhonePanel, setOpenedPhonePanel] = useState(false);
 
   const [activeTab, setActiveTab] = useState<string | null>(null);
@@ -344,24 +349,22 @@ function SectionPanels(props: {
             {activeTab === 'skills-actions' && (
               <SkillsActionsPanel
                 id='CHARACTER'
-                entity={character}
+                entity={props.entity}
+                setEntity={props.setEntity}
                 content={props.content}
                 panelHeight={props.panelHeight}
                 panelWidth={props.panelWidth}
-                inventory={props.inventory}
-                setInventory={props.setInventory}
               />
             )}
 
             {activeTab === 'inventory' && (
               <InventoryPanel
                 id='CHARACTER'
-                entity={character}
+                entity={props.entity}
+                setEntity={props.setEntity}
                 content={props.content}
                 panelHeight={props.panelHeight}
                 panelWidth={props.panelWidth}
-                inventory={props.inventory}
-                setInventory={props.setInventory}
               />
             )}
 
@@ -370,8 +373,8 @@ function SectionPanels(props: {
                 panelHeight={props.panelHeight}
                 panelWidth={props.panelWidth}
                 id={'CHARACTER'}
-                entity={character}
-                setEntity={convertToSetEntity(setCharacter)}
+                entity={props.entity}
+                setEntity={props.setEntity}
               />
             )}
 
@@ -391,8 +394,8 @@ function SectionPanels(props: {
               <NotesPanel
                 panelHeight={props.panelHeight}
                 panelWidth={props.panelWidth}
-                entity={character}
-                setEntity={convertToSetEntity(setCharacter)}
+                entity={props.entity}
+                setEntity={props.setEntity}
               />
             )}
 
@@ -400,14 +403,21 @@ function SectionPanels(props: {
           </BlurBox>
         )}
 
-        <Box
-          style={{
-            position: 'fixed',
-            bottom: 20,
-            right: 20,
-          }}
-        >
-          <Popover position='top' shadow='md' withArrow opened={openedPhonePanel} onChange={setOpenedPhonePanel}>
+        <Box style={getAnchorStyles({ r: 20, b: 20 })}>
+          <Popover
+            position='top'
+            withArrow
+            opened={openedPhonePanel}
+            onChange={setOpenedPhonePanel}
+            styles={(t) => ({
+              dropdown: {
+                backgroundColor: 'rgba(20, 21, 23)',
+                maxWidth: '100dvw',
+                borderRadius: t.radius.lg,
+                padding: t.spacing.sm,
+              },
+            })}
+          >
             <Popover.Target>
               <ActionIcon
                 size={55}
@@ -419,12 +429,12 @@ function SectionPanels(props: {
                 {openedPhonePanel ? <IconX size='2rem' stroke={2} /> : <IconLayoutGrid size='2rem' stroke={1.5} />}
               </ActionIcon>
             </Popover.Target>
-            <Popover.Dropdown w={'100dvw'}>
+            <Popover.Dropdown>
               <Box>
                 <Stack>
                   <Button
                     leftSection={<IconLayoutList size='1.2rem' stroke={2} />}
-                    variant={!props.hideSections ? 'filled' : 'outline'}
+                    variant={!props.hideSections ? 'filled' : 'light'}
                     onClick={() => {
                       props.onHideSections(false);
                       setOpenedPhonePanel(false);
@@ -446,7 +456,7 @@ function SectionPanels(props: {
                     </Button>
                     <Button
                       leftSection={<IconBadgesFilled size='1.2rem' stroke={2} />}
-                      variant={activeTab === 'skills-actions' && props.hideSections ? 'filled' : 'outline'}
+                      variant={activeTab === 'skills-actions' && props.hideSections ? 'filled' : 'light'}
                       onClick={() => {
                         setActiveTab('skills-actions');
                         props.onHideSections(true);
@@ -457,7 +467,7 @@ function SectionPanels(props: {
                     </Button>
                     <Button
                       leftSection={<IconCaretLeftRight size='1.2rem' stroke={2} />}
-                      variant={activeTab === 'feats-features' && props.hideSections ? 'filled' : 'outline'}
+                      variant={activeTab === 'feats-features' && props.hideSections ? 'filled' : 'light'}
                       onClick={() => {
                         setActiveTab('feats-features');
                         props.onHideSections(true);
@@ -470,7 +480,7 @@ function SectionPanels(props: {
                   <SimpleGrid cols={2}>
                     <Button
                       leftSection={<IconBackpack size='1.2rem' stroke={2} />}
-                      variant={activeTab === 'inventory' && props.hideSections ? 'filled' : 'outline'}
+                      variant={activeTab === 'inventory' && props.hideSections ? 'filled' : 'light'}
                       onClick={() => {
                         setActiveTab('inventory');
                         props.onHideSections(true);
@@ -481,7 +491,7 @@ function SectionPanels(props: {
                     </Button>
                     <Button
                       leftSection={<IconFlare size='1.2rem' stroke={2} />}
-                      variant={activeTab === 'spells' && props.hideSections ? 'filled' : 'outline'}
+                      variant={activeTab === 'spells' && props.hideSections ? 'filled' : 'light'}
                       onClick={() => {
                         setActiveTab('spells');
                         props.onHideSections(true);
@@ -494,7 +504,7 @@ function SectionPanels(props: {
                   <SimpleGrid cols={2}>
                     <Button
                       leftSection={<IconNotebook size='1.2rem' stroke={2} />}
-                      variant={activeTab === 'notes' && props.hideSections ? 'filled' : 'outline'}
+                      variant={activeTab === 'notes' && props.hideSections ? 'filled' : 'light'}
                       onClick={() => {
                         setActiveTab('notes');
                         props.onHideSections(true);
@@ -505,7 +515,7 @@ function SectionPanels(props: {
                     </Button>
                     <Button
                       leftSection={<IconListDetails size='1.2rem' stroke={2} />}
-                      variant={activeTab === 'details' && props.hideSections ? 'filled' : 'outline'}
+                      variant={activeTab === 'details' && props.hideSections ? 'filled' : 'light'}
                       onClick={() => {
                         setActiveTab('details');
                         props.onHideSections(true);
@@ -518,7 +528,7 @@ function SectionPanels(props: {
                   <SimpleGrid cols={2}>
                     <Button
                       leftSection={<IconPaw size='1.2rem' stroke={2} />}
-                      variant={activeTab === 'companions' && props.hideSections ? 'filled' : 'outline'}
+                      variant={activeTab === 'companions' && props.hideSections ? 'filled' : 'light'}
                       onClick={() => {
                         setActiveTab('companions');
                         props.onHideSections(true);
@@ -529,7 +539,7 @@ function SectionPanels(props: {
                     </Button>
                     <Button
                       leftSection={<IconNotes size='1.2rem' stroke={2} />}
-                      variant={activeTab === 'extras' && props.hideSections ? 'filled' : 'outline'}
+                      variant={activeTab === 'extras' && props.hideSections ? 'filled' : 'light'}
                       onClick={() => {
                         setActiveTab('extras');
                         props.onHideSections(true);
@@ -547,9 +557,25 @@ function SectionPanels(props: {
       </Box>
     );
   } else {
+    const panelMotion = {
+      initial: { opacity: 0 },
+      animate: { opacity: 1 },
+      exit: { opacity: 1 },
+      transition: {
+        duration: 0.12,
+        ease: 'easeOut',
+      },
+    };
+
     return (
       <Box>
-        <BlurBox blur={10} p='sm' mih={props.panelHeight}>
+        <BlurBox
+          blur={10}
+          p='sm'
+          style={{
+            height: props.panelHeight + 65,
+          }}
+        >
           <Tabs
             color='dark.6'
             variant='pills'
@@ -696,62 +722,92 @@ function SectionPanels(props: {
             </Tabs.Panel>
 
             <Tabs.Panel value='skills-actions'>
-              <SkillsActionsPanel
-                id='CHARACTER'
-                entity={character}
-                content={props.content}
-                panelHeight={props.panelHeight}
-                panelWidth={props.panelWidth}
-                inventory={props.inventory}
-                setInventory={props.setInventory}
-              />
+              <AnimatePresence mode='wait'>
+                <motion.div key='skills-actions' {...panelMotion}>
+                  <SkillsActionsPanel
+                    id='CHARACTER'
+                    entity={props.entity}
+                    setEntity={props.setEntity}
+                    content={props.content}
+                    panelHeight={props.panelHeight}
+                    panelWidth={props.panelWidth}
+                  />
+                </motion.div>
+              </AnimatePresence>
             </Tabs.Panel>
 
             <Tabs.Panel value='inventory'>
-              <InventoryPanel
-                id='CHARACTER'
-                entity={character}
-                content={props.content}
-                panelHeight={props.panelHeight}
-                panelWidth={props.panelWidth}
-                inventory={props.inventory}
-                setInventory={props.setInventory}
-              />
+              <AnimatePresence mode='wait'>
+                <motion.div key='inventory' {...panelMotion}>
+                  <InventoryPanel
+                    id='CHARACTER'
+                    entity={props.entity}
+                    setEntity={props.setEntity}
+                    content={props.content}
+                    panelHeight={props.panelHeight}
+                    panelWidth={props.panelWidth}
+                  />
+                </motion.div>
+              </AnimatePresence>
             </Tabs.Panel>
 
             <Tabs.Panel value='spells'>
-              <SpellsPanel
-                panelHeight={props.panelHeight}
-                panelWidth={props.panelWidth}
-                id={'CHARACTER'}
-                entity={character}
-                setEntity={convertToSetEntity(setCharacter)}
-              />
+              <AnimatePresence mode='wait'>
+                <motion.div key='spells' {...panelMotion}>
+                  <SpellsPanel
+                    panelHeight={props.panelHeight}
+                    panelWidth={props.panelWidth}
+                    id={'CHARACTER'}
+                    entity={props.entity}
+                    setEntity={props.setEntity}
+                  />
+                </motion.div>
+              </AnimatePresence>
             </Tabs.Panel>
 
             <Tabs.Panel value='feats-features'>
-              <FeatsFeaturesPanel panelHeight={props.panelHeight} panelWidth={props.panelWidth} />
+              <AnimatePresence mode='wait'>
+                <motion.div key='feats-features' {...panelMotion}>
+                  <FeatsFeaturesPanel panelHeight={props.panelHeight} panelWidth={props.panelWidth} />
+                </motion.div>
+              </AnimatePresence>
             </Tabs.Panel>
 
             <Tabs.Panel value='companions'>
-              <CompanionsPanel panelHeight={props.panelHeight} panelWidth={props.panelWidth} />
+              <AnimatePresence mode='wait'>
+                <motion.div key='companions' {...panelMotion}>
+                  <CompanionsPanel panelHeight={props.panelHeight} panelWidth={props.panelWidth} />
+                </motion.div>
+              </AnimatePresence>
             </Tabs.Panel>
 
             <Tabs.Panel value='details'>
-              <DetailsPanel content={props.content} panelHeight={props.panelHeight} panelWidth={props.panelWidth} />
+              <AnimatePresence mode='wait'>
+                <motion.div key='details' {...panelMotion}>
+                  <DetailsPanel content={props.content} panelHeight={props.panelHeight} panelWidth={props.panelWidth} />
+                </motion.div>
+              </AnimatePresence>
             </Tabs.Panel>
 
             <Tabs.Panel value='notes'>
-              <NotesPanel
-                panelHeight={props.panelHeight}
-                panelWidth={props.panelWidth}
-                entity={character}
-                setEntity={convertToSetEntity(setCharacter)}
-              />
+              <AnimatePresence mode='wait'>
+                <motion.div key='notes' {...panelMotion}>
+                  <NotesPanel
+                    panelHeight={props.panelHeight}
+                    panelWidth={props.panelWidth}
+                    entity={props.entity}
+                    setEntity={props.setEntity}
+                  />
+                </motion.div>
+              </AnimatePresence>
             </Tabs.Panel>
 
             <Tabs.Panel value='extras'>
-              <ExtrasPanel panelHeight={props.panelHeight} panelWidth={props.panelWidth} />
+              <AnimatePresence mode='wait'>
+                <motion.div key='extras' {...panelMotion}>
+                  <ExtrasPanel panelHeight={props.panelHeight} panelWidth={props.panelWidth} />
+                </motion.div>
+              </AnimatePresence>
             </Tabs.Panel>
           </Tabs>
         </BlurBox>

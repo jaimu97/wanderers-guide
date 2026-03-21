@@ -12,6 +12,7 @@ import {
   Language,
   Archetype,
   VersatileHeritage,
+  ClassArchetype,
 } from '@typing/content';
 import { makeRequest } from '@requests/request-manager';
 
@@ -86,6 +87,13 @@ export async function upsertVersatileHeritage(versHeritage: VersatileHeritage) {
   return result ? (result === true ? versHeritage : result) : null;
 }
 
+export async function upsertClassArchetype(archetype: ClassArchetype) {
+  const result = await makeRequest<ClassArchetype | true>('create-class-archetype', {
+    ...archetype,
+  });
+  return result ? (result === true ? archetype : result) : null;
+}
+
 export async function upsertAncestry(ancestry: Ancestry) {
   const result = await makeRequest<Ancestry | true>('create-ancestry', {
     ...ancestry,
@@ -105,4 +113,23 @@ export async function upsertLanguage(language: Language) {
     ...language,
   });
   return result ? (result === true ? language : result) : null;
+}
+
+export async function upsertContent(type: ContentType, content: Record<string, any>) {
+  switch (type) {
+    case 'ability-block': return upsertAbilityBlock(content as AbilityBlock);
+    case 'ancestry':      return upsertAncestry(content as Ancestry);
+    case 'archetype':     return upsertArchetype(content as Archetype);
+    case 'background':    return upsertBackground(content as Background);
+    case 'class':         return upsertClass(content as Class);
+    case 'class-archetype': return upsertClassArchetype(content as ClassArchetype);
+    case 'content-source':  return upsertContentSource(content as ContentSource);
+    case 'creature':      return upsertCreature(content as Creature);
+    case 'item':          return upsertItem(content as Item);
+    case 'language':      return upsertLanguage(content as Language);
+    case 'spell':         return upsertSpell(content as Spell);
+    case 'trait':         return upsertTrait(content as Trait);
+    case 'versatile-heritage': return upsertVersatileHeritage(content as VersatileHeritage);
+    default:              throw new Error(`No upsert handler for content type: ${type}`);
+  }
 }

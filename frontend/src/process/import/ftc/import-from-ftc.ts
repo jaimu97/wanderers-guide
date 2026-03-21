@@ -1,10 +1,15 @@
 import { generateNames } from '@ai/fantasygen-dev/name-controller';
 import { randomCharacterInfo } from '@ai/open-ai-handler';
 import { getConditionByName } from '@conditions/condition-handler';
-import { defineDefaultSources, fetchContentPackage, fetchContentSources } from '@content/content-store';
+import {
+  defineDefaultSources,
+  fetchContentPackage,
+  fetchContentSources,
+  getDefaultSources,
+} from '@content/content-store';
 import { isItemEquippable, isItemImplantable, isItemInvestable } from '@items/inv-utils';
-import { executeCharacterOperations } from '@operations/operation-controller';
-import { OperationResult } from '@operations/operation-runner';
+import { executeOperations } from '@operations/operations.main';
+import { OperationResult } from '@typing/operations';
 import { ObjectWithUUID, convertKeyToBasePrefix, hasOperationSelection } from '@operations/operation-utils';
 import { makeRequest } from '@requests/request-manager';
 import { Character } from '@typing/content';
@@ -178,7 +183,7 @@ export async function importFromFTC(d: FTC) {
   } satisfies Character as Character;
 
   // Get the content sources
-  const sources = await fetchContentSources({ ids: 'all', includeCommonCore: true });
+  const sources = await fetchContentSources('ALL-OFFICIAL-PUBLIC');
   character.content_sources!.enabled =
     data.content_sources === 'ALL'
       ? sources.map((source) => source.id)
@@ -190,10 +195,10 @@ export async function importFromFTC(d: FTC) {
           .filter(isTruthy);
 
   // Set all content that the character uses
-  defineDefaultSources(character.content_sources?.enabled ?? []);
+  const sv = defineDefaultSources('PAGE', character.content_sources?.enabled ?? []);
 
   // Fetch the content package
-  const content = await fetchContentPackage(undefined, { fetchSources: true });
+  const content = await fetchContentPackage(sv, { fetchSources: true });
 
   // Set the character's class
   if (data.class === 'RANDOM') {
@@ -232,7 +237,14 @@ export async function importFromFTC(d: FTC) {
   let hasSelections = true;
   let iteration = 0;
   while (hasSelections) {
-    const results = await executeCharacterOperations(cloneDeep(character), content, 'CHARACTER-BUILDER');
+    const results = await executeOperations<OperationCharacterResultPackage>({
+      type: 'CHARACTER',
+      data: {
+        character: cloneDeep(character),
+        content,
+        context: 'CHARACTER-BUILDER',
+      },
+    });
     const found = findFirstSelection(results, checked);
 
     if (found) {

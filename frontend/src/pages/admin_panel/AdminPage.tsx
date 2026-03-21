@@ -7,6 +7,7 @@ import UploadContent from './UploadContent';
 import BackgroundFixer from './BackgroundFixer';
 import TraitMerger from './TraitMerger';
 import ContentUpdateRetrigger from './ContentUpdateRetrigger';
+import ContentCleaning from './ContentCleaning';
 import DumpCharacters from './DumpCharacters';
 
 export function Component() {
@@ -21,6 +22,7 @@ export function Component() {
       <BackgroundFixer />
       <ContentUpdateRetrigger />
       <TraitMerger />
+      <ContentCleaning />
       <DumpCharacters />
     </Stack>
   );

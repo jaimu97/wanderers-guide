@@ -5,7 +5,7 @@ import RichText from '@common/RichText';
 import TraitsDisplay from '@common/TraitsDisplay';
 import { FeatSelectionOption, HeritageSelectionOption } from '@common/select/SelectContent';
 import { isAbilityBlockVisible } from '@content/content-hidden';
-import { fetchContentAll, fetchContentById } from '@content/content-store';
+import { fetchContentAll, fetchContentById, getDefaultSources } from '@content/content-store';
 import { getIconFromContentType } from '@content/content-utils';
 import ShowOperationsButton from '@drawers/ShowOperationsButton';
 import { getMetadataOpenedDict } from '@drawers/drawer-utils';
@@ -28,11 +28,11 @@ import {
   useMantineTheme,
 } from '@mantine/core';
 import { addedAncestryLanguages, getAdjustedAncestryOperations } from '@operations/operation-controller';
-import { OperationResult } from '@operations/operation-runner';
 import { IconChevronsDown, IconChevronsUp, IconHelpCircle } from '@tabler/icons-react';
 import { useQuery } from '@tanstack/react-query';
 import { AbilityBlock, Ancestry, Character, Language } from '@typing/content';
 import { DrawerType } from '@typing/index';
+import { OperationResult } from '@typing/operations';
 import { getDisplay, getStatBlockDisplay, getStatDisplay } from '@variables/initial-stats-display';
 import { getAllAttributeVariables } from '@variables/variable-manager';
 import { groupBy } from 'lodash-es';
@@ -99,8 +99,8 @@ export function AncestryDrawerContent(props: {
       // eslint-disable-next-line
       const [_key, { id }] = queryKey;
       const ancestry = await fetchContentById<Ancestry>('ancestry', id);
-      const abilityBlocks = await fetchContentAll<AbilityBlock>('ability-block');
-      const languages = await fetchContentAll<Language>('language');
+      const abilityBlocks = await fetchContentAll<AbilityBlock>('ability-block', getDefaultSources('INFO'));
+      const languages = await fetchContentAll<Language>('language', getDefaultSources('INFO'));
       return {
         ancestry: props.data.ancestry ?? ancestry,
         abilityBlocks,
@@ -574,7 +574,7 @@ export function convertAncestryOperationsIntoUI(
 ) {
   const ancestryOperations = charState[0]
     ? getAdjustedAncestryOperations('CHARACTER', charState[0], ancestry.operations ?? [])
-    : ancestry.operations ?? [];
+    : (ancestry.operations ?? []);
   const MODE = mode;
   const writeDetails =
     MODE === 'READ/WRITE'

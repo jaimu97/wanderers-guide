@@ -3,44 +3,68 @@ import { getCachedPublicUser } from '@auth/user-manager';
 import { applyConditions } from '@conditions/condition-handler';
 import { defineDefaultSources } from '@content/content-store';
 import { saveCustomization } from '@content/customization-cache';
-import { addExtraItems, checkBulkLimit, applyEquipmentPenalties } from '@items/inv-utils';
-import { useDebouncedCallback, useDebouncedValue, useDidUpdate, useFetch, usePrevious } from '@mantine/hooks';
+import { applyEquipmentPenalties } from '@items/inv-utils';
+import { useDebouncedCallback, useDebouncedValue, useDidUpdate, usePrevious } from '@mantine/hooks';
 import { showNotification } from '@mantine/notifications';
-import { executeCharacterOperations } from '@operations/operation-controller';
-import { confirmHealth } from '@pages/character_sheet/living-entity-utils';
+import { executeOperations } from '@operations/operations.main';
+import { confirmHealth } from '@pages/character_sheet/entity-handler';
 import { makeRequest } from '@requests/request-manager';
 import { useQuery, useMutation } from '@tanstack/react-query';
-import { Character, ContentPackage, Inventory } from '@typing/content';
+import { Character, ContentPackage } from '@typing/content';
 import { OperationCharacterResultPackage } from '@typing/operations';
 import { saveCalculatedStats } from '@variables/calculated-stats';
-import { getFinalHealthValue } from '@variables/variable-display';
 import { setVariable } from '@variables/variable-manager';
-import { display } from 'colorjs.io/fn';
 import { isEqual, isArray, cloneDeep } from 'lodash-es';
-import { props } from 'node_modules/cypress/types/bluebird';
 import { useEffect, useRef, useState } from 'react';
 import { SetterOrUpdater, useRecoilState } from 'recoil';
 import { convertToSetEntity } from './type-fixing';
 import { IconRefresh } from '@tabler/icons-react';
 import { hashData } from './numbers';
 import { getDeepDiff } from './objects';
-import { use } from 'chai';
+import { addExtraItems, checkBulkLimit } from '@items/inv-handlers';
+import { getFinalHealthValue } from '@variables/variable-helpers';
+import { supabase } from '../main';
 
+interface CharStateOptionsGeneric {
+  type: string;
+  data?: Record<string, any>;
+}
+
+interface CharStateOptionsExecuteOps extends CharStateOptionsGeneric {
+  type: 'EXECUTE_OPS';
+  data: {
+    content: ContentPackage;
+    context: 'CHARACTER-SHEET' | 'CHARACTER-BUILDER';
+    onFinishLoading: () => void;
+  };
+}
+
+interface CharStateOptionsSimple extends CharStateOptionsGeneric {
+  type: 'SIMPLE';
+  data?: {};
+}
+
+type CharStateOptions = CharStateOptionsExecuteOps | CharStateOptionsSimple;
+
+/**
+ * Custom hook to manage character state, including fetching from the database, executing operations, and auto-saving.
+ * @param characterId - The ID of the character to manage
+ * @param options - Options to control the behavior of the hook, such as whether to execute operations and what content/context to use for those operations
+ * @returns - An object containing the character state, a setter for the character, a loading state, and any results from executed operations
+ */
 export default function useCharacter(
   characterId: number,
-  content: ContentPackage,
-  onFinishLoading?: () => void
+  options: CharStateOptions
 ): {
   character: Character | null;
   setCharacter: SetterOrUpdater<Character | null>;
   //
-  inventory: Inventory;
-  setInventory: SetterOrUpdater<Inventory>;
-  //
-  isLoaded: boolean;
-  saveCharacter: (c: Character) => Promise<Character | null>;
+  saveCharacter?: (c: Character) => Promise<Character | null>;
+  isLoading: boolean;
+  results: OperationCharacterResultPackage | null;
 } {
   const [character, setCharacter] = useRecoilState(characterState);
+  useAutoSave(character, characterId);
 
   const handleFetchedCharacter = (resultCharacter: Character | null | undefined) => {
     if (resultCharacter) {
@@ -63,7 +87,7 @@ export default function useCharacter(
       setCharacter(resultCharacter);
 
       // Make sure we sync the enabled content sources
-      defineDefaultSources(resultCharacter.content_sources?.enabled ?? []);
+      defineDefaultSources('PAGE', resultCharacter.content_sources?.enabled ?? []);
 
       // Cache character customization for fast loading
       saveCustomization({
@@ -80,20 +104,32 @@ export default function useCharacter(
   // Fetch character from db
   useEffect(() => {
     (async () => {
-      const dbCharacter = await makeRequest<Character>('find-character', {
-        id: characterId,
-      });
+      // Before fetching the character, check if there's an autosaved version in localStorage and save it to the database if it exists
+      const key = `autosave-character-${characterId}`;
+      const pending = localStorage.getItem(key);
+      if (pending) {
+        const { token, body } = JSON.parse(pending);
+        await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/update-character`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify(body),
+        });
+        localStorage.removeItem(key);
+      }
+
+      // Now fetch the character from the database to ensure we have the latest version
+      const dbCharacter = await makeRequest<Character>('find-character', { id: characterId });
       handleFetchedCharacter(dbCharacter);
     })();
   }, []);
 
   // Execute operations
   const [operationResults, setOperationResults] = useState<OperationCharacterResultPackage>();
-  const [executingOperations, setExecutingOperations] = useState(false);
+  const executingOperations = useRef<number | null>(null);
 
-  const [debouncedCharacter] = useDebouncedValue(character, 200);
+  const [debouncedCharacter] = useDebouncedValue(character, 800);
   const prevDebouncedCharacter = usePrevious(debouncedCharacter);
-  const setCharacterDebounced = useDebouncedCallback(setCharacter, 200);
+  const setCharacterDebounced = useDebouncedCallback(setCharacter, 800);
 
   const getCharacterPayload = (c: Character) => {
     return {
@@ -117,6 +153,7 @@ export default function useCharacter(
       operation_data: c.operation_data,
       spells: c.spells,
       companions: c.companions,
+      campaign_id: c.campaign_id,
     };
   };
 
@@ -154,83 +191,97 @@ export default function useCharacter(
   };
 
   useEffect(() => {
-    if (
-      !debouncedCharacter ||
-      executingOperations ||
-      getUpdateHash(prevDebouncedCharacter) === getUpdateHash(debouncedCharacter)
-    )
-      return;
-    setTimeout(() => {
-      if (
-        !debouncedCharacter ||
-        executingOperations ||
-        getUpdateHash(prevDebouncedCharacter) === getUpdateHash(debouncedCharacter)
-      )
-        return;
+    if (options.type !== 'EXECUTE_OPS') return;
+    if (!debouncedCharacter) return;
 
-      console.log('> Executing ops #', getUpdateHash(debouncedCharacter));
+    const prevOpsHash = getUpdateHash(prevDebouncedCharacter);
+    const opsHash = getUpdateHash(debouncedCharacter);
+    if (prevOpsHash === opsHash || executingOperations.current === opsHash) return;
 
-      setExecutingOperations(true);
-      executeCharacterOperations(debouncedCharacter, content, 'CHARACTER-SHEET').then((results) => {
-        // Final execution pipeline:
-
-        if (debouncedCharacter.variants?.proficiency_without_level) {
-          setVariable('CHARACTER', 'PROF_WITHOUT_LEVEL', true);
-        }
-
-        // Add the extra items to the inventory from variables
-        addExtraItems('CHARACTER', content.items, debouncedCharacter, convertToSetEntity(setCharacterDebounced));
-
-        // Check bulk limits
-        checkBulkLimit(
-          'CHARACTER',
-          debouncedCharacter,
-          convertToSetEntity(setCharacterDebounced),
-          debouncedCharacter.options?.ignore_bulk_limit !== true
-        );
-
-        // Apply armor/shield penalties
-        applyEquipmentPenalties('CHARACTER', debouncedCharacter);
-
-        // Apply conditions after everything else
-        applyConditions('CHARACTER', debouncedCharacter.details?.conditions ?? []);
-
-        if (debouncedCharacter.meta_data?.reset_hp !== false) {
-          // To reset hp, we need to confirm health
-
-          const handleRestHP = () => {
-            const maxHealth = getFinalHealthValue('CHARACTER');
-            confirmHealth(`${maxHealth}`, maxHealth, debouncedCharacter, convertToSetEntity(setCharacterDebounced));
-          };
-
-          // We run it twice for it to break out of the debouncing lock (not a perfect solution, but works)
-          handleRestHP();
-          setTimeout(() => {
-            handleRestHP();
-          }, 750);
-        } else {
-          // Because of the drained condition, let's confirm health
-          const maxHealth = getFinalHealthValue('CHARACTER');
-          confirmHealth(
-            `${debouncedCharacter.hp_current}`,
-            maxHealth,
-            debouncedCharacter,
-            convertToSetEntity(setCharacterDebounced)
-          );
-        }
-
-        // Save calculated stats
-        saveCalculatedStats('CHARACTER', debouncedCharacter, convertToSetEntity(setCharacterDebounced));
-
-        setOperationResults(results);
-        setExecutingOperations(false);
-
-        setTimeout(() => {
-          onFinishLoading?.();
-        }, 100);
-      });
-    }, 1);
+    console.log('> Executing ops #', opsHash);
+    executingOperations.current = opsHash;
+    executeOperations<OperationCharacterResultPackage>({
+      type: 'CHARACTER',
+      data: {
+        character: debouncedCharacter,
+        content: options.data.content,
+        context: options.data.context,
+      },
+    }).then((results) => handleOperationResults(results));
   }, [debouncedCharacter]);
+
+  const handleOperationResults = (results: OperationCharacterResultPackage) => {
+    if (options.type !== 'EXECUTE_OPS') return;
+    if (!debouncedCharacter) return;
+    if (executingOperations.current !== getUpdateHash(debouncedCharacter)) {
+      // Old execution, ignore
+      console.log('... Ignoring outdated ops #', getUpdateHash(debouncedCharacter));
+      return;
+    }
+
+    // Final execution pipeline:
+    console.log('... Finished executing ops #', getUpdateHash(debouncedCharacter));
+
+    if (debouncedCharacter.variants?.proficiency_without_level) {
+      setVariable('CHARACTER', 'PROF_WITHOUT_LEVEL', true);
+    }
+
+    // Add the extra items to the inventory from variables
+    addExtraItems(
+      'CHARACTER',
+      options.data.content.items,
+      debouncedCharacter,
+      convertToSetEntity(setCharacterDebounced)
+    );
+
+    // Check bulk limits
+    checkBulkLimit(
+      'CHARACTER',
+      debouncedCharacter,
+      convertToSetEntity(setCharacterDebounced),
+      debouncedCharacter.options?.ignore_bulk_limit !== true
+    );
+
+    // Apply armor/shield penalties
+    applyEquipmentPenalties('CHARACTER', debouncedCharacter);
+
+    // Apply conditions after everything else
+    applyConditions('CHARACTER', debouncedCharacter.details?.conditions ?? []);
+
+    if (debouncedCharacter.meta_data?.reset_hp !== false) {
+      // To reset hp, we need to confirm health
+
+      const handleRestHP = () => {
+        const maxHealth = getFinalHealthValue('CHARACTER');
+        confirmHealth(`${maxHealth}`, maxHealth, debouncedCharacter, convertToSetEntity(setCharacterDebounced));
+      };
+
+      // We run it twice for it to break out of the debouncing lock (not a perfect solution, but works)
+      handleRestHP();
+      setTimeout(() => {
+        handleRestHP();
+      }, 1000);
+    } else {
+      // Because of the drained condition, let's confirm health
+      const maxHealth = getFinalHealthValue('CHARACTER');
+      confirmHealth(
+        `${debouncedCharacter.hp_current}`,
+        maxHealth,
+        debouncedCharacter,
+        convertToSetEntity(setCharacterDebounced)
+      );
+    }
+
+    // Save calculated stats
+    saveCalculatedStats('CHARACTER', debouncedCharacter, convertToSetEntity(setCharacterDebounced));
+
+    setOperationResults(results);
+    executingOperations.current = null;
+
+    setTimeout(() => {
+      options.data.onFinishLoading?.();
+    }, 100);
+  };
 
   // Update character in db when state changed
   useDidUpdate(() => {
@@ -247,8 +298,7 @@ export default function useCharacter(
     },
     onSuccess: (c) => {
       if (c) {
-        console.log('> Updated character #', getUpdateHash(debouncedCharacter));
-        handleFetchedCharacter(c);
+        console.log('> Fetched updated character: #', getUpdateHash(character), 'vs.', getUpdateHash(c));
       }
     },
   });
@@ -302,37 +352,95 @@ export default function useCharacter(
     enabled: false, // notRecentlyUpdated, Fix polling on char item update
   });
 
-  // Inventory saving & management
-  const getInventory = (character: Character | null) => {
-    // Default inventory
-    return cloneDeep(
-      character?.inventory ?? {
-        coins: {
-          cp: 0,
-          sp: 0,
-          gp: 0,
-          pp: 0,
-        },
-        items: [],
-      }
-    );
-  };
-  const setInventory: SetterOrUpdater<Inventory> = (u) => {
-    setCharacter((c) => {
-      if (!c) return null;
-      return {
-        ...c,
-        inventory: c?.inventory ? (typeof u === 'function' ? u(c?.inventory) : u) : undefined,
-      };
-    });
-  };
+  const isFinished =
+    // There must be a character
+    !!character &&
+    // It must be the requested one
+    character.id === characterId &&
+    // There must be some operation results if ops were executed
+    (options.type === 'EXECUTE_OPS' ? !!operationResults : true);
 
   return {
-    character: character,
+    character,
     setCharacter,
-    inventory: getInventory(character),
-    setInventory,
-    isLoaded: !!operationResults,
     saveCharacter,
+    isLoading: !isFinished,
+    results: operationResults ?? null,
   };
+}
+
+/**
+ * Custom hook to auto-save character data to localStorage when the page is closed or hidden, and to sync the auth token with Supabase session
+ * @param character - The character data to auto-save
+ * @param characterId - The ID of the character, used for namespacing the localStorage key
+ * @returns void
+ */
+function useAutoSave(character: Character | null, characterId: number) {
+  const characterRef = useRef(character);
+  const tokenRef = useRef<string>(import.meta.env.VITE_SUPABASE_KEY);
+
+  useEffect(() => {
+    characterRef.current = character;
+  }, [character]);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.access_token) tokenRef.current = session.access_token;
+    });
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.access_token) tokenRef.current = session.access_token;
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    const saveImmediately = () => {
+      const c = characterRef.current;
+      if (!c) return;
+      // localStorage.setItem is synchronous — guaranteed to complete even on tab close
+      localStorage.setItem(
+        `autosave-character-${characterId}`,
+        JSON.stringify({
+          token: tokenRef.current,
+          body: {
+            id: characterId,
+            name: c.name,
+            level: c.level,
+            experience: c.experience,
+            hp_current: c.hp_current,
+            hp_temp: c.hp_temp,
+            hero_points: c.hero_points,
+            stamina_current: c.stamina_current,
+            resolve_current: c.resolve_current,
+            inventory: c.inventory,
+            notes: c.notes,
+            details: c.details,
+            roll_history: c.roll_history,
+            custom_operations: c.custom_operations,
+            meta_data: c.meta_data,
+            options: c.options,
+            variants: c.variants,
+            content_sources: c.content_sources,
+            operation_data: c.operation_data,
+            spells: c.spells,
+            companions: c.companions,
+            campaign_id: c.campaign_id,
+          },
+        })
+      );
+    };
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') saveImmediately();
+    };
+
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    window.addEventListener('pagehide', saveImmediately);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      window.removeEventListener('pagehide', saveImmediately);
+    };
+  }, []);
 }

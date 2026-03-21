@@ -1,6 +1,7 @@
 import { OperationSection } from '@common/operations/Operations';
 import RichTextInput from '@common/rich_text_input/RichTextInput';
-import { DISCORD_URL, EDIT_MODAL_HEIGHT } from '@constants/data';
+import { EDIT_MODAL_HEIGHT } from '@constants/data';
+import { DISCORD_URL } from '@constants/urls';
 import { fetchContentById } from '@content/content-store';
 import { toHTML } from '@content/content-utils';
 import {
@@ -166,6 +167,7 @@ export function CreateAncestryModal(props: {
                   setDescription(json);
                   form.setFieldValue('description', text);
                 }}
+                maxHeight={500}
               />
             )}
 

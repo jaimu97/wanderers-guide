@@ -1,4 +1,4 @@
-import { drawerState, feedbackState } from '@atoms/navAtoms';
+import { creatureDrawerState, drawerState, feedbackState } from '@atoms/navAtoms';
 import { userState } from '@atoms/userAtoms';
 import { getCachedPublicUser, getPublicUser } from '@auth/user-manager';
 import RichText from '@common/RichText';
@@ -7,6 +7,7 @@ import {
   AncestrySelectionOption,
   ArchetypeSelectionOption,
   BackgroundSelectionOption,
+  ClassArchetypeSelectionOption,
   ClassSelectionOption,
   CreatureSelectionOption,
   FeatSelectionOption,
@@ -30,7 +31,6 @@ import { useQuery } from '@tanstack/react-query';
 import { AbilityBlockType, ContentSource, ContentType } from '@typing/content';
 import { useEffect, useRef, useState } from 'react';
 import { useRecoilState } from 'recoil';
-import { CREATURE_DRAWER_ZINDEX } from './CreatureDrawer';
 import { DrawerType } from '@typing/index';
 import { COMMON_CORE_ID, PATHFINDER_CORE_ID, STARFINDER_CORE_ID } from '@constants/data';
 
@@ -43,10 +43,7 @@ export function ContentSourceDrawerTitle(props: { data: { id?: number; source?: 
       // @ts-ignore
       // eslint-disable-next-line
       const [_key, { id }] = queryKey;
-      const sources = await fetchContentSources({
-        ids: [id],
-        includeCommonCore: true,
-      });
+      const sources = await fetchContentSources([id]);
       return sources?.find((s) => s.id === id) ?? null;
     },
     enabled: !!id,
@@ -78,7 +75,7 @@ export function ContentSourceDrawerTitle(props: { data: { id?: number; source?: 
 
   useEffect(() => {
     if (!source) return;
-    defineDefaultSourcesForSource(source);
+    defineDefaultSourcesForSource('INFO', source);
   }, [source]);
 
   return (
@@ -144,6 +141,7 @@ export function ContentSourceDrawerContent(props: {
   const [searchValue, setSearchValue] = useState('');
 
   const [_drawer, openDrawer] = useRecoilState(drawerState);
+  const [_creatureDrawer, openCreatureDrawer] = useRecoilState(creatureDrawerState);
   const [_feedbackData, setFeedbackData] = useRecoilState(feedbackState);
 
   const { data: content } = useQuery({
@@ -390,6 +388,39 @@ export function ContentSourceDrawerContent(props: {
               </Accordion.Panel>
             </Accordion.Item>
           )}
+          {content.classArchetypes.length > 0 && (
+            <Accordion.Item value={'class-archetypes'} w='100%'>
+              <Accordion.Control>
+                <Group wrap='nowrap' justify='space-between' gap={0}>
+                  <Text c='white' fz='sm'>
+                    Class Archetypes
+                  </Text>
+                  <Badge mr='sm' variant='outline' color='gray.5' size='xs'>
+                    <Text fz='sm' c='gray.5' span>
+                      {content.classArchetypes.length}
+                    </Text>
+                  </Badge>
+                </Group>
+              </Accordion.Control>
+              <Accordion.Panel>
+                <Divider color='dark.6' />
+                {content.classArchetypes.map((record, index) => (
+                  <ClassArchetypeSelectionOption
+                    key={index}
+                    classArchetype={record}
+                    showButton={false}
+                    onClick={(a) => {
+                      openDrawer({
+                        type: 'class-archetype',
+                        data: { id: a.id },
+                        extra: { addToHistory: true },
+                      });
+                    }}
+                  />
+                ))}
+              </Accordion.Panel>
+            </Accordion.Item>
+          )}
           {content.archetypes.length > 0 && (
             <Accordion.Item value={'archetypes'} w='100%'>
               <Accordion.Control>
@@ -478,10 +509,11 @@ export function ContentSourceDrawerContent(props: {
                     creature={record}
                     showButton={false}
                     onClick={(a) => {
-                      openDrawer({
-                        type: 'creature',
-                        data: { id: a.id, readOnly: true, zIndex: CREATURE_DRAWER_ZINDEX },
-                        extra: { addToHistory: true },
+                      openCreatureDrawer({
+                        data: {
+                          id: a.id,
+                          readOnly: true,
+                        },
                       });
                     }}
                   />
@@ -806,6 +838,7 @@ export function ContentSourceDrawerContent(props: {
                 { label: 'Background', value: 'background' },
                 { label: 'Class', value: 'class' },
                 { label: 'Class Feature', value: 'class-feature' },
+                { label: 'Class Archetype', value: 'class-archetype' },
                 { label: 'Creature', value: 'creature' },
                 { label: 'Feat', value: 'feat' },
                 { label: 'Heritage', value: 'heritage' },

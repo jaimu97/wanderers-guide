@@ -22,14 +22,12 @@ import {
   isListStr,
   isVariableListStr,
   isExtendedProficiencyType,
-  nextProficiencyType,
-  prevProficiencyType,
   isProficiencyValue,
   isExtendedProficiencyValue,
   compileExpressions,
 } from './variable-utils';
-import { throwError } from '@utils/notifications';
 import { cloneDeep, isBoolean, isEqual, isNumber, isString, uniq } from 'lodash-es';
+import { throwError } from '@utils/error-handling';
 
 export const HIDDEN_VARIABLES = [
   'SKILL_LORE____',
@@ -212,6 +210,7 @@ const DEFAULT_VARIABLES: Record<string, Variable> = {
   ANCESTRY_NAMES: newVariable('list-str', 'ANCESTRY_NAMES'),
   BACKGROUND_NAMES: newVariable('list-str', 'BACKGROUND_NAMES'),
   HERITAGE_NAMES: newVariable('list-str', 'HERITAGE_NAMES'),
+  CLASS_ARCHETYPE_NAMES: newVariable('list-str', 'CLASS_ARCHETYPE_NAMES'),
   FEAT_NAMES: newVariable('list-str', 'FEAT_NAMES'),
   SPELL_NAMES: newVariable('list-str', 'SPELL_NAMES'),
   LANGUAGE_NAMES: newVariable('list-str', 'LANGUAGE_NAMES'),
@@ -226,6 +225,7 @@ const DEFAULT_VARIABLES: Record<string, Variable> = {
   ANCESTRY_IDS: newVariable('list-str', 'ANCESTRY_IDS'),
   BACKGROUND_IDS: newVariable('list-str', 'BACKGROUND_IDS'),
   HERITAGE_IDS: newVariable('list-str', 'HERITAGE_IDS'),
+  CLASS_ARCHETYPE_IDS: newVariable('list-str', 'CLASS_ARCHETYPE_IDS'),
   FEAT_IDS: newVariable('list-str', 'FEAT_IDS'),
   SPELL_IDS: newVariable('list-str', 'SPELL_IDS'),
   LANGUAGE_IDS: newVariable('list-str', 'LANGUAGE_IDS'),
@@ -301,6 +301,9 @@ const DEFAULT_VARIABLES: Record<string, Variable> = {
   MELEE_ATTACK_ROLLS_BONUS: newVariable('num', 'MELEE_ATTACK_ROLLS_BONUS'),
   MELEE_ATTACK_DAMAGE_BONUS: newVariable('num', 'MELEE_ATTACK_DAMAGE_BONUS'),
 
+  NON_SPELL_ATTACK_ROLLS_BONUS: newVariable('num', 'NON_SPELL_ATTACK_ROLLS_BONUS'),
+  NON_SPELL_ATTACK_DAMAGE_BONUS: newVariable('num', 'NON_SPELL_ATTACK_DAMAGE_BONUS'),
+
   WEAPON_GROUP_AXE: newVariable('prof', 'WEAPON_GROUP_AXE'),
   WEAPON_GROUP_BOMB: newVariable('prof', 'WEAPON_GROUP_BOMB'),
   WEAPON_GROUP_BOW: newVariable('prof', 'WEAPON_GROUP_BOW'),
@@ -356,7 +359,7 @@ const DEFAULT_VARIABLES: Record<string, Variable> = {
 
 const variableMap = new Map<string, VariableStore>();
 
-export function getVariableStore(id: StoreID) {
+function getVariableStore(id: StoreID) {
   if (!variableMap.has(id)) {
     variableMap.set(id, {
       variables: cloneDeep(DEFAULT_VARIABLES),
@@ -516,6 +519,24 @@ export function resetVariables(id?: StoreID) {
   } else {
     variableMap.clear();
   }
+}
+
+/**
+ * Imports a variable store
+ * @param id - store ID
+ * @param store - VariableStore
+ */
+export function importVariableStore(id: StoreID, store: VariableStore) {
+  variableMap.set(id, cloneDeep(store));
+}
+
+/**
+ * Exports a variable store
+ * @param id - store ID
+ * @returns - VariableStore
+ */
+export function exportVariableStore(id: StoreID): VariableStore {
+  return cloneDeep(getVariableStore(id));
 }
 
 /**

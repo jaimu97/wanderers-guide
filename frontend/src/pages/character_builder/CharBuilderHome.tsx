@@ -69,9 +69,8 @@ import BlurButton from '@common/BlurButton';
 import OperationsModal from '@modals/OperationsModal';
 import { hasPatreonAccess } from '@utils/patreon';
 import { phoneQuery } from '@utils/mobile-responsive';
-import { drawerState, feedbackState } from '@atoms/navAtoms';
-import { AbilityBlockType, Campaign, ContentType, PublicUser } from '@typing/content';
-import ContentFeedbackModal from '@modals/ContentFeedbackModal';
+import { drawerState } from '@atoms/navAtoms';
+import { Campaign, PublicUser } from '@typing/content';
 import { userState } from '@atoms/userAtoms';
 import { makeRequest } from '@requests/request-manager';
 import { updateSubscriptions } from '@content/homebrew';
@@ -79,8 +78,9 @@ import { ImageOption } from '@typing/index';
 import { cloneDeep, isEqual, uniq } from 'lodash-es';
 import BlurBox from '@common/BlurBox';
 import { DisplayIcon } from '@common/IconDisplay';
+import useCharacter from '@utils/use-character';
 
-export default function CharBuilderHome(props: { pageHeight: number }) {
+export default function CharBuilderHome(props: { characterId: number; pageHeight: number }) {
   const theme = useMantineTheme();
 
   const { ref, height } = useElementSize();
@@ -90,7 +90,10 @@ export default function CharBuilderHome(props: { pageHeight: number }) {
   const queryClient = useQueryClient();
   const [_drawer, openDrawer] = useRecoilState(drawerState);
 
-  const [character, setCharacter] = useRecoilState(characterState);
+  const { character, setCharacter } = useCharacter(props.characterId, {
+    type: 'SIMPLE',
+  });
+
   const [loadingGenerateName, setLoadingGenerateName] = useState(false);
   const [displayNameInput, refreshNameInput] = useRefresh();
 
@@ -132,9 +135,9 @@ export default function CharBuilderHome(props: { pageHeight: number }) {
   });
 
   const { data: fetchedBooks, refetch } = useQuery({
-    queryKey: [`get-content-sources`],
+    queryKey: [`get-content-sources-character-settings`, { characterId: character?.id }],
     queryFn: async () => {
-      return (await fetchContentSources({ ids: 'all' })).filter((book) => book.deprecated !== true);
+      return (await fetchContentSources('ALL-OFFICIAL-PUBLIC')).filter((book) => book.deprecated !== true);
     },
   });
   const books = fetchedBooks ?? [];
@@ -193,23 +196,28 @@ export default function CharBuilderHome(props: { pageHeight: number }) {
       // Update character content sources
       setCharacter((prev) => {
         if (!prev) return prev;
+
+        const newEnabled = enabled
+          ? uniq([...(prev.content_sources?.enabled ?? []), ...bookIds])
+          : prev.content_sources?.enabled?.filter((id: number) => !bookIds.includes(id));
+
+        // Refresh data to repopulate with new book content
+        resetContentStore();
+        defineDefaultSources('PAGE', newEnabled ?? []);
+        refetch();
+        queryClient.invalidateQueries({
+          queryKey: [`find-content-${character?.id}`, `get-character-init-builder-${character?.id}`],
+        });
+
+        // Save new enabled books to character
         return {
           ...prev,
           content_sources: {
             ...prev.content_sources,
-            enabled: enabled
-              ? uniq([...(prev.content_sources?.enabled ?? []), ...bookIds])
-              : prev.content_sources?.enabled?.filter((id: number) => !bookIds.includes(id)),
+            enabled: newEnabled,
           },
         };
       });
-      setTimeout(() => {
-        // Refresh data to repopulate with new book content
-        resetContentStore();
-        defineDefaultSources(character?.content_sources?.enabled ?? []);
-        refetch();
-        queryClient.invalidateQueries({ queryKey: [`find-content-${character?.id}`] });
-      }, 200);
     };
 
     if (enabled) {
@@ -1127,9 +1135,7 @@ export default function CharBuilderHome(props: { pageHeight: number }) {
 
             const missingSourceIds = homebrewSources?.filter((id: number) => !subscribedSources.includes(id));
             const missingSources =
-              missingSourceIds && missingSourceIds.length > 0
-                ? await fetchContentSources({ homebrew: true, ids: missingSourceIds })
-                : [];
+              missingSourceIds && missingSourceIds.length > 0 ? await fetchContentSources(missingSourceIds) : [];
 
             const subscribeToMissingSources = async () => {
               if (!user) return;
@@ -1319,7 +1325,7 @@ export default function CharBuilderHome(props: { pageHeight: number }) {
                   }}
                   w={isPhone ? undefined : 220}
                   rightSection={
-                    <HoverCard width={280} shadow='md' openDelay={750}>
+                    <HoverCard width={280} shadow='md' openDelay={500}>
                       <HoverCard.Target>
                         <ActionIcon
                           size={22}

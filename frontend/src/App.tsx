@@ -1,5 +1,5 @@
 import { characterState } from '@atoms/characterAtoms';
-import { drawerState } from '@atoms/navAtoms';
+import { creatureDrawerState, drawerState } from '@atoms/navAtoms';
 import { sessionState } from '@atoms/supabaseAtoms';
 import { getContentDataFromHref } from '@common/rich_text_input/ContentLinkExtension';
 import { GUIDE_BLUE } from '@constants/data';
@@ -12,8 +12,8 @@ import { ModalsProvider } from '@mantine/modals';
 import { Notifications } from '@mantine/notifications';
 import SearchSpotlight from '@nav/SearchSpotlight';
 import { IconBrush } from '@tabler/icons-react';
-import { getBackgroundImageFromURL, getHomeBackgroundImage } from '@utils/background-images';
-import { lazy, useEffect, useState } from 'react';
+import { getBackgroundImageFromURL } from '@utils/background-images';
+import { useEffect, useState } from 'react';
 import { Outlet, useLocation, useSearchParams } from 'react-router-dom';
 import { useRecoilState, useRecoilValue } from 'recoil';
 import { supabase } from './main';
@@ -34,11 +34,12 @@ import { isEqual } from 'lodash-es';
 import SelectSpellSlotModal from '@modals/SelectSpellSlotModal';
 import SelectStaffCastingModal from '@modals/SelectStaffCastingModal';
 import InitiativeRollModal from '@modals/InitiativeRollModal';
-import { update } from 'node_modules/cypress/types/lodash';
 import UpdateEncounterModal from '@modals/UpdateEncounterModal';
 import GenerateEncounterModal from '@modals/GenerateEncounterModal';
-import { getShadesFromColor } from '@utils/colors';
 import UpdateApiClientModal from '@modals/UpdateApiClientModal';
+import { getAnchorStyles } from '@utils/anchor';
+import BuyItemModal from '@modals/BuyItemModal';
+import { generateColors } from '@mantine/colors-generator';
 
 // TODO, it would be great to dynamically import these modals, but it with Mantine v7.6.2 it doesn't work
 // const SelectContentModal = lazy(() => import('@common/select/SelectContent'));
@@ -66,6 +67,7 @@ const modals = {
   condition: ConditionModal,
   createDicePreset: CreateDicePresetModal,
   addItems: AddItemsModal,
+  buyItem: BuyItemModal,
 };
 // declare module '@mantine/modals' {
 //   export interface MantineModalsOverride {
@@ -75,6 +77,7 @@ const modals = {
 
 export default function App() {
   const [_drawer, openDrawer] = useRecoilState(drawerState);
+  const [_creatureDrawer, openCreatureDrawer] = useRecoilState(creatureDrawerState);
   const isPhone = useMediaQuery(phoneQuery());
 
   const [session, setSession] = useRecoilState(sessionState);
@@ -118,8 +121,7 @@ export default function App() {
   const generateTheme = (theme?: { color?: string }) => {
     return createTheme({
       colors: {
-        // @ts-ignore
-        guide: getShadesFromColor(theme?.color || getCachedCustomization()?.sheet_theme?.color || GUIDE_BLUE),
+        guide: generateColors(theme?.color || getCachedCustomization()?.sheet_theme?.color || GUIDE_BLUE),
         dark: [
           '#C1C2C5',
           '#A6A7AB',
@@ -159,11 +161,22 @@ export default function App() {
       const openValue = searchParams.get('open');
       if (openValue) {
         const contentData = getContentDataFromHref(openValue);
-        const drawerData = contentData ? convertContentLink(contentData) : null;
-        if (drawerData) {
+        if (contentData?.type === 'creature') {
           setTimeout(() => {
-            openDrawer(drawerData);
+            openCreatureDrawer({
+              data: {
+                id: parseInt(contentData.id),
+                readOnly: true,
+              },
+            });
           }, 500);
+        } else {
+          const drawerData = contentData ? convertContentLink(contentData) : null;
+          if (drawerData) {
+            setTimeout(() => {
+              openDrawer(drawerData);
+            }, 500);
+          }
         }
         //removeQueryParam('open');
       }
@@ -185,14 +198,14 @@ export default function App() {
             <Text
               size='xs'
               c='dimmed'
-              style={{
-                position: 'fixed',
-                bottom: 6,
-                right: 10,
-                zIndex: 1,
-              }}
+              style={[
+                getAnchorStyles({ r: 10, b: 6 }),
+                {
+                  zIndex: 1,
+                },
+              ]}
             >
-              <IconBrush size='0.5rem' /> {background.source}
+              <IconBrush size='0.55rem' /> {background.source}
             </Text>
           </Anchor>
         )}

@@ -5,9 +5,8 @@ import { CharacterInfo } from '@common/CharacterInfo';
 import RichText from '@common/RichText';
 import ResultWrapper from '@common/operations/results/ResultWrapper';
 import { SelectContentButton, selectContent } from '@common/select/SelectContent';
-import { FilterOptions, defaultFeatOptions, prereqFilterOption } from '@common/select/filters';
 import { ICON_BG_COLOR_HOVER } from '@constants/data';
-import { fetchContentPackage, fetchContentSources } from '@content/content-store';
+import { fetchContent, fetchContentPackage, fetchContentSources, getDefaultSources } from '@content/content-store';
 import { getIconFromContentType } from '@content/content-utils';
 import classes from '@css/FaqSimple.module.css';
 import { AncestryInitialOverview, convertAncestryOperationsIntoUI } from '@drawers/types/AncestryDrawer';
@@ -27,16 +26,15 @@ import {
   Title,
   useMantineTheme,
 } from '@mantine/core';
-import { useDebouncedValue, useDidUpdate, useElementSize, useHover, useInterval, useMergedRef } from '@mantine/hooks';
+import { useElementSize, useHover, useInterval, useMediaQuery, useMergedRef } from '@mantine/hooks';
 import { openContextModal } from '@mantine/modals';
 import { getChoiceCounts } from '@operations/choice-count-tracker';
-import { executeCharacterOperations } from '@operations/operation-controller';
-import { OperationResult } from '@operations/operation-runner';
+import { OperationResult } from '@typing/operations';
 import { ObjectWithUUID, convertKeyToBasePrefix, hasOperationSelection } from '@operations/operation-utils';
 import { removeParentSelections } from '@operations/selection-tree';
 import { IconId, IconPuzzle } from '@tabler/icons-react';
 import { useQuery } from '@tanstack/react-query';
-import { AbilityBlock, Ancestry, Background, Class, ContentPackage } from '@typing/content';
+import { AbilityBlock, Ancestry, Background, Character, Class, ClassArchetype, ContentPackage } from '@typing/content';
 import { ImageOption } from '@typing/index';
 import { OperationCharacterResultPackage, OperationSelect } from '@typing/operations';
 import { VariableListStr, VariableProf } from '@typing/variables';
@@ -48,31 +46,37 @@ import { getAllSkillVariables, getVariable } from '@variables/variable-manager';
 import { compileProficiencyType, variableToLabel } from '@variables/variable-utils';
 import { isEqual, truncate } from 'lodash-es';
 import { useEffect, useRef, useState } from 'react';
-import { useRecoilState, useRecoilValue } from 'recoil';
+import { SetterOrUpdater, useRecoilState, useRecoilValue } from 'recoil';
+import useCharacter from '@utils/use-character';
+import { phoneQuery } from '@utils/mobile-responsive';
 
 // Determines how often to check for choice counts
-const CHOICE_COUNT_INTERVAL = 2500;
+const CHOICE_COUNT_INTERVAL = 1500;
 
-export default function CharBuilderCreation(props: { pageHeight: number }) {
+export default function CharBuilderCreation(props: { characterId: number; pageHeight: number }) {
   const theme = useMantineTheme();
-  const character = useRecoilValue(characterState);
   const [doneLoading, setDoneLoading] = useState(false);
 
   const { data: content, isFetching } = useQuery({
-    queryKey: [`find-content-${character?.id}`],
+    queryKey: [`find-content-${props.characterId}-for-char-builder-creation`, { characterId: props.characterId }],
     queryFn: async () => {
       // Prefetch content sources (to avoid multiple requests)
-      await fetchContentSources({ includeCommonCore: true });
+      await fetchContentSources(getDefaultSources('PAGE'));
 
-      const content = await fetchContentPackage(undefined, { fetchSources: true, fetchCreatures: false });
+      const content = await fetchContentPackage(getDefaultSources('PAGE'), {
+        fetchSources: true,
+        fetchCreatures: false,
+      });
       return content;
     },
     refetchOnWindowFocus: false,
   });
 
+  console.log('Content for character builder creation:', content, getDefaultSources('PAGE'));
+
   // Just load progress manually
   const [percentage, setPercentage] = useState(0);
-  const interval = useInterval(() => setPercentage((p) => p + 2), 30);
+  const interval = useInterval(() => setPercentage(percentage + 2), 50);
   useEffect(() => {
     interval.start();
     return interval.stop;
@@ -100,6 +104,7 @@ export default function CharBuilderCreation(props: { pageHeight: number }) {
         <div style={{ display: doneLoading ? 'none' : undefined }}>{loader}</div>
         <div style={{ display: doneLoading ? undefined : 'none' }}>
           <CharBuilderCreationInner
+            characterId={props.characterId}
             content={content}
             pageHeight={props.pageHeight}
             onFinishLoading={() => {
@@ -114,37 +119,25 @@ export default function CharBuilderCreation(props: { pageHeight: number }) {
 }
 
 export function CharBuilderCreationInner(props: {
+  characterId: number;
   content: ContentPackage;
   pageHeight: number;
-  onFinishLoading?: () => void;
+  onFinishLoading: () => void;
 }) {
   const isMobile = isCharacterBuilderMobile();
+  const isPhone = useMediaQuery(phoneQuery());
   const [statPanelOpened, setStatPanelOpened] = useState(false);
 
-  const [character, setCharacter] = useRecoilState(characterState);
   const [levelItemValue, setLevelItemValue] = useState<string | null>(null);
 
-  // Execute operations
-  const [operationResults, setOperationResults] = useState<OperationCharacterResultPackage>();
-  const executingOperations = useRef(false);
-  const [sDebouncedCharacter] = useDebouncedValue(character, 200);
-  useEffect(() => {
-    if (!sDebouncedCharacter || executingOperations.current) return;
-    setTimeout(() => {
-      if (!sDebouncedCharacter || executingOperations.current) return;
-      executingOperations.current = true;
-      executeCharacterOperations(sDebouncedCharacter, props.content, 'CHARACTER-BUILDER').then((results) => {
-        setOperationResults(results);
-        executingOperations.current = false;
-      });
-    }, 1);
-  }, [sDebouncedCharacter]);
-
-  useEffect(() => {
-    setTimeout(() => {
-      props.onFinishLoading?.();
-    }, CHOICE_COUNT_INTERVAL + 500);
-  }, []);
+  const { character, setCharacter, results } = useCharacter(props.characterId, {
+    type: 'EXECUTE_OPS',
+    data: {
+      content: props.content,
+      context: 'CHARACTER-BUILDER',
+      onFinishLoading: props.onFinishLoading,
+    },
+  });
 
   const levelItems = Array.from({ length: (character?.level ?? 0) + 1 }, (_, i) => i).map((level) => {
     return (
@@ -153,13 +146,13 @@ export function CharBuilderCreationInner(props: {
         level={level}
         opened={levelItemValue === `${level}`}
         content={props.content}
-        operationResults={operationResults}
+        operationResults={results}
       />
     );
   });
 
   return (
-    <Group gap={0}>
+    <Group gap={0} px={isMobile ? undefined : 'sm'}>
       {isMobile ? (
         <Drawer
           opened={statPanelOpened}
@@ -177,10 +170,10 @@ export function CharBuilderCreationInner(props: {
           <CharacterStatSidebar content={props.content} pageHeight={props.pageHeight} />
         </Box>
       )}
-      <Box style={{ flexBasis: isMobile ? '100%' : '64%' }}>
+      <Box style={{ flexBasis: isMobile ? '100%' : '65%' }}>
         {isMobile && (
           <>
-            <Group justify='space-between' align='flex-start' wrap='nowrap'>
+            <Group px='sm' justify='space-between' align='flex-start' wrap='nowrap'>
               <CharacterInfo
                 character={character}
                 hideImage
@@ -206,7 +199,6 @@ export function CharBuilderCreationInner(props: {
                       });
                     },
                     {
-                      groupBySource: true,
                       selectedId: character?.details?.ancestry?.id,
                     }
                   );
@@ -233,7 +225,6 @@ export function CharBuilderCreationInner(props: {
                       });
                     },
                     {
-                      groupBySource: true,
                       selectedId: character?.details?.background?.id,
                     }
                   );
@@ -242,6 +233,8 @@ export function CharBuilderCreationInner(props: {
                   selectContent<Class>(
                     'class',
                     (option) => {
+                      handleClassArchetypeSelection(character, setCharacter, option, '1');
+
                       // Wipe old data
                       let selections = removeParentSelections('class_', character?.operation_data?.selections);
                       if (!character?.variants?.dual_class) {
@@ -254,6 +247,7 @@ export function CharBuilderCreationInner(props: {
                           details: {
                             ...prev.details,
                             class: option,
+                            class_archetype: undefined,
                           },
                           operation_data: {
                             ...prev.operation_data,
@@ -263,7 +257,6 @@ export function CharBuilderCreationInner(props: {
                       });
                     },
                     {
-                      groupBySource: true,
                       selectedId: character?.details?.class?.id,
                       filterFn: (option) => option.id !== character?.details?.class_2?.id,
                     }
@@ -273,6 +266,8 @@ export function CharBuilderCreationInner(props: {
                   selectContent<Class>(
                     'class',
                     (option) => {
+                      handleClassArchetypeSelection(character, setCharacter, option, '2');
+
                       // Wipe old data
                       const selections = removeParentSelections('class-2_', character?.operation_data?.selections);
                       setCharacter((prev) => {
@@ -282,6 +277,7 @@ export function CharBuilderCreationInner(props: {
                           details: {
                             ...prev.details,
                             class_2: option,
+                            class_archetype_2: undefined,
                           },
                           operation_data: {
                             ...prev.operation_data,
@@ -291,7 +287,6 @@ export function CharBuilderCreationInner(props: {
                       });
                     },
                     {
-                      groupBySource: true,
                       selectedId: character?.details?.class_2?.id,
                       filterFn: (option) => option.id !== character?.details?.class?.id,
                     }
@@ -300,19 +295,19 @@ export function CharBuilderCreationInner(props: {
               />
               <Button
                 leftSection={<IconId size={14} />}
-                variant='light'
+                variant='subtle'
                 size='xs'
                 onClick={() => {
                   setStatPanelOpened((prev) => !prev);
                 }}
               >
-                Stats
+                Preview
               </Button>
             </Group>
-            <Divider pb={5} />
+            <Divider mt={5} />
           </>
         )}
-        <ScrollArea h={props.pageHeight} pr={14} scrollbars='y'>
+        <ScrollArea h={props.pageHeight + (isMobile ? -100 : 0)} type={isPhone ? 'never' : undefined} scrollbars='y'>
           <Accordion
             value={levelItemValue}
             onChange={setLevelItemValue}
@@ -329,6 +324,9 @@ export function CharBuilderCreationInner(props: {
               item: {
                 marginTop: 0,
                 marginBottom: 5,
+              },
+              content: {
+                paddingInline: isPhone ? 0 : undefined,
               },
             }}
           >
@@ -373,7 +371,6 @@ function CharacterStatSidebar(props: { content: ContentPackage; pageHeight: numb
                 });
               },
               {
-                groupBySource: true,
                 selectedId: character?.details?.ancestry?.id,
               }
             );
@@ -400,7 +397,6 @@ function CharacterStatSidebar(props: { content: ContentPackage; pageHeight: numb
                 });
               },
               {
-                groupBySource: true,
                 selectedId: character?.details?.background?.id,
               }
             );
@@ -409,6 +405,8 @@ function CharacterStatSidebar(props: { content: ContentPackage; pageHeight: numb
             selectContent<Class>(
               'class',
               (option) => {
+                handleClassArchetypeSelection(character, setCharacter, option, '1');
+
                 // Wipe old data
                 let selections = removeParentSelections('class_', character?.operation_data?.selections);
                 if (!character?.variants?.dual_class) {
@@ -421,6 +419,7 @@ function CharacterStatSidebar(props: { content: ContentPackage; pageHeight: numb
                     details: {
                       ...prev.details,
                       class: option,
+                      class_archetype: undefined,
                     },
                     operation_data: {
                       ...prev.operation_data,
@@ -430,7 +429,6 @@ function CharacterStatSidebar(props: { content: ContentPackage; pageHeight: numb
                 });
               },
               {
-                groupBySource: true,
                 selectedId: character?.details?.class?.id,
                 filterFn: (option) => option.id !== character?.details?.class_2?.id,
               }
@@ -440,6 +438,8 @@ function CharacterStatSidebar(props: { content: ContentPackage; pageHeight: numb
             selectContent<Class>(
               'class',
               (option) => {
+                handleClassArchetypeSelection(character, setCharacter, option, '2');
+
                 // Wipe old data
                 const selections = removeParentSelections('class-2_', character?.operation_data?.selections);
                 setCharacter((prev) => {
@@ -449,6 +449,7 @@ function CharacterStatSidebar(props: { content: ContentPackage; pageHeight: numb
                     details: {
                       ...prev.details,
                       class_2: option,
+                      class_archetype_2: undefined,
                     },
                     operation_data: {
                       ...prev.operation_data,
@@ -458,7 +459,6 @@ function CharacterStatSidebar(props: { content: ContentPackage; pageHeight: numb
                 });
               },
               {
-                groupBySource: true,
                 selectedId: character?.details?.class_2?.id,
                 filterFn: (option) => option.id !== character?.details?.class?.id,
               }
@@ -1102,7 +1102,7 @@ function LevelSection(props: {
   level: number;
   opened: boolean;
   content: ContentPackage;
-  operationResults?: OperationCharacterResultPackage;
+  operationResults: OperationCharacterResultPackage | null;
 }) {
   const theme = useMantineTheme();
   const [subSectionValue, setSubSectionValue] = useState<string | null>(null);
@@ -1128,7 +1128,7 @@ function LevelSection(props: {
       }
     }, CHOICE_COUNT_INTERVAL);
     return () => clearInterval(intervalId);
-  }, []);
+  }, [props.operationResults]);
 
   const saveSelectionChange = (path: string, value: string) => {
     setCharacter((prev) => {
@@ -1259,6 +1259,65 @@ function LevelSection(props: {
   );
 }
 
+/**
+ * Handle class archetype selection
+ * @param character - current character
+ * @param setCharacter - setter for character state
+ * @param class_ - selected class
+ * @param recordT - '1' for primary class, '2' for second class
+ */
+function handleClassArchetypeSelection(
+  _character: Character | null,
+  setCharacter: SetterOrUpdater<Character | null>,
+  class_: Class,
+  recordT: '1' | '2'
+) {
+  fetchContent<ClassArchetype>('class-archetype', {
+    class_id: class_.id,
+    content_sources: getDefaultSources('PAGE'),
+  }).then((options) => {
+    if (options.length > 0) {
+      selectContent<ClassArchetype>(
+        'class-archetype',
+        (option) => {
+          if (option.id === -999) {
+            return;
+          }
+
+          setCharacter((prev) => {
+            if (!prev) return prev;
+            return {
+              ...prev,
+              details: {
+                ...(prev.details ?? {}),
+                class_archetype: recordT === '1' ? option : prev.details?.class_archetype,
+                class_archetype_2: recordT === '2' ? option : prev.details?.class_archetype_2,
+              },
+            };
+          });
+        },
+        {
+          selectedId: -1,
+          description: (
+            <Text fz='sm'>
+              This class supports optional class archetypes that reshape its core mechanics. Would you like to select
+              one?
+            </Text>
+          ),
+          overrideOptions: [
+            {
+              id: -999,
+              class_id: class_.id,
+              name: '— Base Class (No Archetype)',
+            },
+            ...options,
+          ],
+        }
+      );
+    }
+  });
+}
+
 function ClassFeatureAccordionItem(props: {
   id: string;
   feature: AbilityBlock;
@@ -1285,7 +1344,7 @@ function ClassFeatureAccordionItem(props: {
       }
     }, CHOICE_COUNT_INTERVAL);
     return () => clearInterval(intervalId);
-  }, []);
+  }, [props.results]);
 
   return (
     <Accordion.Item
@@ -1350,7 +1409,7 @@ function AncestrySectionAccordionItem(props: {
       }
     }, CHOICE_COUNT_INTERVAL);
     return () => clearInterval(intervalId);
-  }, []);
+  }, [props.results]);
 
   return (
     <Accordion.Item
@@ -1393,7 +1452,7 @@ function AncestrySectionAccordionItem(props: {
 
 function InitialStatsLevelSection(props: {
   content: ContentPackage;
-  operationResults?: OperationCharacterResultPackage;
+  operationResults: OperationCharacterResultPackage | null;
   onSaveChanges: (path: string, value: string) => void;
 }) {
   const [subSectionValue, setSubSectionValue] = useState<string | null>(null);
@@ -1537,7 +1596,7 @@ function AncestryAccordionItem(props: {
       }
     }, CHOICE_COUNT_INTERVAL);
     return () => clearInterval(intervalId);
-  }, []);
+  }, [props.operationResults]);
 
   // Only display the operation results that aren't already displayed in the ancestry overview
   const physicalFeatures = (props.content.abilityBlocks ?? []).filter((block) => block.type === 'physical-feature');
@@ -1657,7 +1716,7 @@ function BackgroundAccordionItem(props: {
       }
     }, CHOICE_COUNT_INTERVAL);
     return () => clearInterval(intervalId);
-  }, []);
+  }, [props.operationResults]);
 
   // Only display the operation results that aren't already displayed in the background overview
   let backgroundOperationResults = props.operationResults?.backgroundResults ?? [];
@@ -1765,7 +1824,7 @@ function ClassAccordionItem(props: {
       }
     }, CHOICE_COUNT_INTERVAL);
     return () => clearInterval(intervalId);
-  }, []);
+  }, [props.operationResults]);
 
   // Only display the operation results that aren't already displayed in the class overview
   let classOperationResults =
@@ -1878,7 +1937,7 @@ function BooksAccordionItem(props: {
       }
     }, CHOICE_COUNT_INTERVAL);
     return () => clearInterval(intervalId);
-  }, []);
+  }, [props.operationResults]);
 
   return (
     <Accordion.Item
@@ -1942,7 +2001,7 @@ function ItemsAccordionItem(props: {
       }
     }, CHOICE_COUNT_INTERVAL);
     return () => clearInterval(intervalId);
-  }, []);
+  }, [props.operationResults]);
 
   return (
     <Accordion.Item
@@ -2008,7 +2067,7 @@ function CustomAccordionItem(props: {
       }
     }, CHOICE_COUNT_INTERVAL);
     return () => clearInterval(intervalId);
-  }, []);
+  }, [props.operationResults]);
 
   const selections = props.operationResults.characterResults.filter((result) => hasOperationSelection(result));
 
@@ -2096,29 +2155,11 @@ function OperationResultSelector(props: {
   level?: number;
   onChange: (path: string, value: string) => void;
 }) {
-  const character = useRecoilValue(characterState);
-  const showPrereqFilter = () => {
-    const DETECT_PREREQUS = character?.options?.auto_detect_prerequisites ?? false;
-    if (!DETECT_PREREQUS) {
-      return false;
-    }
-    if ((props.result?.selection?.options ?? []).length == 0) {
-      return false;
-    }
-    return (
-      props.result?.selection?.options[0]._content_type === 'ability-block' &&
-      props.result?.selection?.options[0].type === 'feat'
-    );
-  };
-  let filterOptions: FilterOptions = { options: defaultFeatOptions };
-  if (showPrereqFilter()) {
-    filterOptions = { options: [prereqFilterOption, ...defaultFeatOptions] };
-  }
   return (
     <SelectContentButton
       type={
         (props.result?.selection?.options ?? []).length > 0
-          ? props.result?.selection?.options[0]._content_type ?? 'ability-block'
+          ? (props.result?.selection?.options[0]._content_type ?? 'ability-block')
           : 'ability-block'
       }
       onClick={(option) => {
@@ -2137,7 +2178,13 @@ function OperationResultSelector(props: {
         abilityBlockType:
           (props.result?.selection?.options ?? []).length > 0 ? props.result?.selection?.options[0].type : undefined,
         skillAdjustment: props.result?.selection?.skillAdjustment,
-        filterOptions,
+        // advancedPresetFilters: {
+        //   type: props.result?.selection?.options[0]._content_type,
+        //   ab_type: props.result?.selection?.options[0].type,
+        //   content_sources: character ? character.content_sources?.enabled : undefined,
+        //   level_max: character ? character.level : undefined,
+        //   level_min: 1,
+        // },
       }}
     />
   );

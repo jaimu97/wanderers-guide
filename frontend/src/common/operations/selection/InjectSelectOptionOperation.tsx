@@ -1,18 +1,14 @@
-import { fetchContentAll } from '@content/content-store';
+import { fetchContentAll, getDefaultSources } from '@content/content-store';
 import { OperationWrapper } from '../Operations';
-import { Autocomplete, Group, Select, Stack } from '@mantine/core';
+import { Select, Stack } from '@mantine/core';
 import { useDidUpdate } from '@mantine/hooks';
 import { useQuery } from '@tanstack/react-query';
 import { AbilityBlock, ContentSource, Item } from '@typing/content';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { flatten, uniqWith, isEqual, uniqBy } from 'lodash-es';
-import { Operation, OperationSelect, OperationSelectOptionCustom } from '@typing/operations';
+import { InjectedSelectOption, Operation, OperationSelect, OperationSelectOptionCustom } from '@typing/operations';
 import { SelectionPredefinedCustomOption } from './SelectionOperation';
 
-export interface InjectedSelectOption {
-  opId: string;
-  option: OperationSelectOptionCustom;
-}
 interface WrappedOperationSelect extends OperationSelect {
   _sourceName: string;
 }
@@ -29,17 +25,17 @@ export function InjectSelectOptionOperation(props: {
     queryFn: async () => {
       const operations: Operation[] = [];
 
-      const abOpps = (await fetchContentAll<AbilityBlock>('ability-block')).map((ab) => {
+      const abOpps = (await fetchContentAll<AbilityBlock>('ability-block', getDefaultSources('PAGE'))).map((ab) => {
         return (ab.operations ?? []).map((op) => ({ ...op, _sourceName: ab.name }));
       });
       operations.push(...uniqWith(flatten(abOpps), isEqual));
 
-      const csOpps = (await fetchContentAll<ContentSource>('content-source')).map((cs) => {
+      const csOpps = (await fetchContentAll<ContentSource>('content-source', getDefaultSources('PAGE'))).map((cs) => {
         return (cs.operations ?? []).map((op) => ({ ...op, _sourceName: cs.name }));
       });
       operations.push(...uniqWith(flatten(csOpps), isEqual));
 
-      const iOpps = (await fetchContentAll<Item>('item')).map((i) => {
+      const iOpps = (await fetchContentAll<Item>('item', getDefaultSources('PAGE'))).map((i) => {
         return (i.operations ?? []).map((op) => ({ ...op, _sourceName: i.name }));
       });
       operations.push(...uniqWith(flatten(iOpps), isEqual));

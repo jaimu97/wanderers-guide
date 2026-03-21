@@ -1,5 +1,5 @@
 import { Text, Stack, Button, Group, Loader, Avatar, Modal, Title, Box, useMantineTheme, Anchor } from '@mantine/core';
-import { AbilityBlockType, ContentSource, ContentType } from '@typing/content';
+import { AbilityBlockType, ContentSource, ContentType, Item } from '@typing/content';
 import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { IconBook2, IconHash } from '@tabler/icons-react';
@@ -12,7 +12,6 @@ import {
   fetchItemByName,
   fetchSpellByName,
   fetchTraitByName,
-  getDefaultSources,
 } from '@content/content-store';
 import { CreateAbilityBlockModal } from './CreateAbilityBlockModal';
 import { hideNotification, showNotification } from '@mantine/notifications';
@@ -29,7 +28,11 @@ import { CreateCreatureModal } from './CreateCreatureModal';
 import { CreateArchetypeModal } from './CreateArchetypeModal';
 import { CreateVersatileHeritageModal } from './CreateVersatileHeritageModal';
 import { CreateContentSourceOnlyModal } from './CreateContentSourceModal';
-import { cloneDeep, uniq } from 'lodash-es';
+import { cloneDeep } from 'lodash-es';
+import { CreateClassArchetypeModal } from './CreateClassArchetypeModal';
+import { userState } from '@atoms/userAtoms';
+import { useRecoilValue } from 'recoil';
+import { cleanContent, openCleaningPage } from '@ai/cleaning/cleaning-manager';
 
 export default function ContentFeedbackModal(props: {
   opened: boolean;
@@ -38,6 +41,7 @@ export default function ContentFeedbackModal(props: {
   onCompleteFeedback: () => void;
   type: ContentType | AbilityBlockType;
   data: { id?: number; contentSourceId?: number };
+  zIndex?: number;
 }) {
   const [submitUpdate, setSubmitUpdate] = useState<{ id: number | undefined; content: any } | null>(null);
 
@@ -46,10 +50,8 @@ export default function ContentFeedbackModal(props: {
       props.onStartFeedback();
       setSubmitUpdate({ id: undefined, content: props.type });
 
-      // Add the content source to make sure we can reference it's content. TODO: Add required sources too
-      if (props.data.contentSourceId && props.data.contentSourceId !== -1) {
-        defineDefaultSources(uniq([...getDefaultSources(), props.data.contentSourceId]));
-      }
+      // Add the content source to make sure we can reference it's content
+      defineDefaultSources('INFO', props.data.contentSourceId ? [props.data.contentSourceId] : 'ALL-USER-ACCESSIBLE');
     }
   }, []);
 
@@ -123,7 +125,7 @@ export default function ContentFeedbackModal(props: {
         }}
         title={<Title order={3}>Content Details</Title>}
         size={'sm'}
-        zIndex={1000}
+        zIndex={props.zIndex ?? 1000}
       >
         <Box style={{ position: 'relative', minHeight: 150 }}>
           <ContentFeedbackSection
@@ -213,6 +215,17 @@ export default function ContentFeedbackModal(props: {
               editId={submitUpdate.id}
               onComplete={async (versHeritage) => {
                 await handleComplete(versHeritage.id, versHeritage.content_source_id, versHeritage);
+              }}
+              onCancel={() => handleReset()}
+            />
+          )}
+
+          {props.type === 'class-archetype' && (
+            <CreateClassArchetypeModal
+              opened={true}
+              editId={submitUpdate.id}
+              onComplete={async (archetype) => {
+                await handleComplete(archetype.id, archetype.content_source_id, archetype);
               }}
               onCancel={() => handleReset()}
             />
@@ -346,6 +359,8 @@ function ContentFeedbackSection(props: {
   const theme = useMantineTheme();
   const contentId = props.data.id;
 
+  const user = useRecoilValue(userState);
+
   const { data, isFetching } = useQuery({
     queryKey: [`find-content-${props.type}-${contentId}`],
     queryFn: async () => {
@@ -430,6 +445,22 @@ function ContentFeedbackSection(props: {
           >
             Submit Content Update
           </Button>
+          {user?.is_admin && (
+            <>
+              {props.type === 'item' && (
+                <Button
+                  fullWidth
+                  variant='light'
+                  onClick={async () => {
+                    if (!data.content) return;
+                    openCleaningPage(crypto.randomUUID(), 'item', cloneDeep(data.content));
+                  }}
+                >
+                  Attempt Clean
+                </Button>
+              )}
+            </>
+          )}
         </Group>
       )}
     </Stack>

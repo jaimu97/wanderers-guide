@@ -57,7 +57,7 @@ export default function CampaignDrawer(props: { opened: boolean; onClose: () => 
     
     return (
       <Group gap={10} px={5}>
-        <Text>›</Text>
+        <Text>➵</Text>
         <Text>{character.name}</Text>
         <Group gap={5} wrap='nowrap'>
           <Text
@@ -111,6 +111,7 @@ export default function CampaignDrawer(props: { opened: boolean; onClose: () => 
           </Group>
         }
         size={'calc(min(100dvw, 400px))'}
+        lockScroll={!isWideDesktop}
         closeOnClickOutside={!isWideDesktop}
         withOverlay={!isWideDesktop}
         styles={{
