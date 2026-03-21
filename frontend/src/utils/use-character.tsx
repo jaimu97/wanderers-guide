@@ -38,6 +38,7 @@ export default function useCharacter(
   setInventory: SetterOrUpdater<Inventory>;
   //
   isLoaded: boolean;
+  saveCharacter: (c: Character) => Promise<Character | null>;
 } {
   const [character, setCharacter] = useRecoilState(characterState);
 
@@ -94,35 +95,60 @@ export default function useCharacter(
   const prevDebouncedCharacter = usePrevious(debouncedCharacter);
   const setCharacterDebounced = useDebouncedCallback(setCharacter, 200);
 
+  const getCharacterPayload = (c: Character) => {
+    return {
+      name: c.name,
+      level: c.level,
+      experience: c.experience,
+      hp_current: c.hp_current,
+      hp_temp: c.hp_temp,
+      hero_points: c.hero_points,
+      stamina_current: c.stamina_current,
+      resolve_current: c.resolve_current,
+      inventory: c.inventory,
+      notes: c.notes,
+      details: c.details,
+      roll_history: c.roll_history,
+      custom_operations: c.custom_operations,
+      meta_data: c.meta_data,
+      options: c.options,
+      variants: c.variants,
+      content_sources: c.content_sources,
+      operation_data: c.operation_data,
+      spells: c.spells,
+      companions: c.companions,
+    };
+  };
+
   const getUpdateHash = (c: Character | null | undefined) => {
     return hashData(
       c
         ? cloneDeep({
-            id: c.id,
-            campaign_id: c.campaign_id,
-            user_id: c.user_id,
-            level: c.level,
-            inventory: c.inventory,
-            spells: c.spells,
-            operation_data: c.operation_data,
-            details: {
-              conditions: c.details?.conditions,
-              ancestry: c.details?.ancestry,
-              background: c.details?.background,
-              class: c.details?.class,
-              class_2: c.details?.class_2,
-            },
-            custom_operations: c.custom_operations,
-            options: c.options,
-            variants: c.variants,
-            content_sources: c.content_sources,
-            companions: c.companions, // Might not be needed
-            meta_data: {
-              active_modes: c.meta_data?.active_modes,
-              given_item_ids: c.meta_data?.given_item_ids,
-              reset_hp: c.meta_data?.reset_hp,
-            },
-          })
+          id: c.id,
+          campaign_id: c.campaign_id,
+          user_id: c.user_id,
+          level: c.level,
+          inventory: c.inventory,
+          spells: c.spells,
+          operation_data: c.operation_data,
+          details: {
+            conditions: c.details?.conditions,
+            ancestry: c.details?.ancestry,
+            background: c.details?.background,
+            class: c.details?.class,
+            class_2: c.details?.class_2,
+          },
+          custom_operations: c.custom_operations,
+          options: c.options,
+          variants: c.variants,
+          content_sources: c.content_sources,
+          companions: c.companions, // Might not be needed
+          meta_data: {
+            active_modes: c.meta_data?.active_modes,
+            given_item_ids: c.meta_data?.given_item_ids,
+            reset_hp: c.meta_data?.reset_hp,
+          },
+        })
         : {}
     );
   };
@@ -209,28 +235,7 @@ export default function useCharacter(
   // Update character in db when state changed
   useDidUpdate(() => {
     if (!debouncedCharacter) return;
-    mutateCharacter({
-      name: debouncedCharacter.name,
-      level: debouncedCharacter.level,
-      experience: debouncedCharacter.experience,
-      hp_current: debouncedCharacter.hp_current,
-      hp_temp: debouncedCharacter.hp_temp,
-      hero_points: debouncedCharacter.hero_points,
-      stamina_current: debouncedCharacter.stamina_current,
-      resolve_current: debouncedCharacter.resolve_current,
-      inventory: debouncedCharacter.inventory,
-      notes: debouncedCharacter.notes,
-      details: debouncedCharacter.details,
-      roll_history: debouncedCharacter.roll_history,
-      custom_operations: debouncedCharacter.custom_operations,
-      meta_data: debouncedCharacter.meta_data,
-      options: debouncedCharacter.options,
-      variants: debouncedCharacter.variants,
-      content_sources: debouncedCharacter.content_sources,
-      operation_data: debouncedCharacter.operation_data,
-      spells: debouncedCharacter.spells,
-      companions: debouncedCharacter.companions,
-    });
+    mutateCharacter(getCharacterPayload(debouncedCharacter));
   }, [debouncedCharacter]);
   const { mutate: mutateCharacter } = useMutation({
     mutationFn: async (data: Record<string, any>) => {
@@ -247,6 +252,25 @@ export default function useCharacter(
       }
     },
   });
+  const { mutateAsync: mutateCharacterAsync } = useMutation({
+    mutationFn: async (data: Record<string, any>) => {
+      const resData = await makeRequest('update-character', {
+        id: characterId,
+        ...data,
+      });
+      return isArray(resData) && resData.length > 0 ? (resData[0] as Character) : null;
+    },
+    onSuccess: (c) => {
+      if (c) {
+        console.log('> Updated character (async) #', getUpdateHash(c));
+        handleFetchedCharacter(c);
+      }
+    },
+  });
+
+  const saveCharacter = async (c: Character) => {
+    return await mutateCharacterAsync(getCharacterPayload(c));
+  };
 
   // Poll remote character updates - only if the character hasn't been updated recently
   const [lDebouncedCharacter] = useDebouncedValue(character, 5000);
@@ -309,5 +333,6 @@ export default function useCharacter(
     inventory: getInventory(character),
     setInventory,
     isLoaded: !!operationResults,
+    saveCharacter,
   };
 }

@@ -148,7 +148,7 @@ function CharacterSheetInner(props: { content: ContentPackage; characterId: numb
   const panelHeight = height > 800 ? 555 : 500;
   const [hideSections, setHideSections] = useState(false);
 
-  const { character, setCharacter, inventory, setInventory, isLoaded } = useCharacter(
+  const { character, setCharacter, inventory, setInventory, isLoaded, saveCharacter } = useCharacter(
     props.characterId,
     props.content,
     props.onFinishLoading
@@ -173,7 +173,12 @@ function CharacterSheetInner(props: { content: ContentPackage; characterId: numb
         <Box ref={ref}>
           <Stack gap='xs' style={{ position: 'relative' }}>
             <SimpleGrid cols={isPhone ? 1 : isTablet ? 2 : 3} spacing='xs' verticalSpacing='xs'>
-              <EntityInfoSection id='CHARACTER' entity={character} setEntity={convertToSetEntity(setCharacter)} />
+              <EntityInfoSection
+                id='CHARACTER'
+                entity={character}
+                setEntity={convertToSetEntity(setCharacter)}
+                saveEntity={saveCharacter}
+              />
               {!hideSections && (
                 <>
                   <HealthSection id='CHARACTER' entity={character} setEntity={convertToSetEntity(setCharacter)} />

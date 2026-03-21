@@ -20,6 +20,7 @@ export default function EntityInfoSection(this: any, props: {
   id: StoreID;
   entity: LivingEntity | null;
   setEntity: SetterOrUpdater<LivingEntity | null>;
+  saveEntity?: (c: Character) => Promise<Character | null>;
 }) {
   const navigate = useNavigate();
   const theme = useMantineTheme();
@@ -40,20 +41,20 @@ export default function EntityInfoSection(this: any, props: {
   };
 
   // I take 1000 xp and give you 1 level
-  const handleLevelUp = () => {
+  const handleLevelUp = async () => {
     if (!props.entity || !isCharacter(props.entity)) return;
     const currentExp = props.entity.experience || 0;
     if (currentExp < 1000) return;
-    
-    props.setEntity((entity) => {
-      if (!entity) return entity;
-      return {
-        ...entity,
-        experience: currentExp - 1000,
-        level: entity.level + 1,
-      };
-    });
-    
+
+    const newEntity = {
+      ...props.entity,
+      experience: currentExp - 1000,
+      level: props.entity.level + 1,
+    };
+
+    props.setEntity(newEntity);
+    await props.saveEntity?.(newEntity);
+
     // and then derail the campaign by taking you to the character builder
     navigate(`/builder/${props.entity.id}`);
   };
@@ -151,7 +152,7 @@ export default function EntityInfoSection(this: any, props: {
                         </Box>
                       ),
                       labels: { confirm: 'Rest', cancel: 'Cancel' },
-                      onCancel: () => {},
+                      onCancel: () => { },
                       onConfirm: () => {
                         if (props.entity) {
                           handleRest(props.id, props.entity, props.setEntity);
@@ -197,17 +198,17 @@ export default function EntityInfoSection(this: any, props: {
                 />
               </Box>
               {showLevelUpButton && (
-              <Box>
-                <BlurButton
-                  size='compact-xs'
-                  bgColor={ICON_BG_COLOR}
-                  fw={500}
-                  fullWidth
-                  onClick={handleLevelUp}
-                >
-                  Level Up
-                </BlurButton>
-              </Box>
+                <Box>
+                  <BlurButton
+                    size='compact-xs'
+                    bgColor={ICON_BG_COLOR}
+                    fw={500}
+                    fullWidth
+                    onClick={handleLevelUp}
+                  >
+                    Level Up
+                  </BlurButton>
+                </Box>
               )}
             </Stack>
           </Stack>
