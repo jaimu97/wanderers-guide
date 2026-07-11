@@ -3,9 +3,9 @@ import { collectEntitySpellcasting } from '@content/collect-content';
 import classes from '@css/ActionsGrid.module.css';
 import { Text, Card, ScrollArea, SimpleGrid, Stack, UnstyledButton, Divider, Box } from '@mantine/core';
 import { ContextModalProps } from '@mantine/modals';
-import { Spell, SpellSlot, SpellSlotRecord } from '@typing/content';
+import { Spell, SpellSlot, SpellSlotRecord } from '@schemas/content';
 import { rankNumber } from '@utils/numbers';
-import { useRecoilState } from 'recoil';
+import { useAtom } from 'jotai';
 
 export default function SelectSpellSlotModal({
   context,
@@ -35,7 +35,7 @@ export function SelectSpellSlotModalContents(props: {
   onSelect: (slot: SpellSlotRecord) => void;
   onClose: () => void;
 }) {
-  const [character, setCharacter] = useRecoilState(characterState);
+  const [character, setCharacter] = useAtom(characterState);
   const slots = (character && collectEntitySpellcasting('CHARACTER', character).slots) ?? [];
 
   const items = slots
@@ -68,7 +68,7 @@ export function SelectSpellSlotModalContents(props: {
             {slot.spell_id ? (
               <Text fw={600}>{props.allSpells.find((s) => s.id === slot.spell_id)!.name}</Text>
             ) : (
-              <Text c='gray.6' fs='italic' fz='sm'>
+              <Text c='gray.3' fs='italic' fz='sm'>
                 {'No Spell Prepared'}
               </Text>
             )}

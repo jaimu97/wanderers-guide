@@ -17,7 +17,7 @@ import { useForm } from '@mantine/form';
 import { useDisclosure } from '@mantine/hooks';
 import { useQuery } from '@tanstack/react-query';
 import { JSONContent } from '@tiptap/react';
-import { Availability, Language, Rarity } from '@typing/content';
+import { Availability, Language, Rarity } from '@schemas/content';
 import useRefresh from '@utils/use-refresh';
 import { useState } from 'react';
 
@@ -38,7 +38,7 @@ export function CreateLanguageModal(props: {
     queryKey: [`get-language-${props.editId}`, { editId: props.editId, editLanguage: props.editLanguage }],
     queryFn: async ({ queryKey }) => {
       // @ts-ignore
-      // eslint-disable-next-line
+       
       const [_key, { editId, editLanguage }] = queryKey as [string, { editId?: number; editLanguage?: Language }];
 
       const language = editId ? await fetchContentById<Language>('language', editId) : editLanguage;
@@ -67,7 +67,8 @@ export function CreateLanguageModal(props: {
       script: '',
       description: '',
       rarity: 'COMMON' as Rarity,
-      availability: undefined as Availability | undefined,
+      availability: null as Availability | null,
+      deprecated: false,
       content_source_id: -1,
     },
   });

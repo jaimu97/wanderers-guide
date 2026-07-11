@@ -61,8 +61,8 @@ import {
   Spell,
   Trait,
   VersatileHeritage,
-} from '@typing/content';
-import { Operation } from '@typing/operations';
+} from '@schemas/content';
+import { Operation } from '@schemas/operations';
 import { pluralize, toLabel } from '@utils/strings';
 import * as JsSearch from 'js-search';
 import { useEffect, useRef, useState } from 'react';
@@ -78,7 +78,7 @@ import { CreateCreatureModal } from './CreateCreatureModal';
 import { CreateArchetypeModal } from './CreateArchetypeModal';
 import { CreateVersatileHeritageModal } from './CreateVersatileHeritageModal';
 import { drawerState } from '@atoms/navAtoms';
-import { useRecoilState } from 'recoil';
+import { useAtom } from 'jotai';
 import Paginator from '@common/Paginator';
 import TraitsDisplay from '@common/TraitsDisplay';
 import { ActionSymbol } from '@common/Actions';
@@ -158,6 +158,8 @@ export function ContentSourceEditor(props: {
         artwork_url: source.artwork_url ?? '',
         require_key: source.require_key,
         keys: source.keys,
+        deprecated: source.deprecated ?? null,
+        meta_data: source.meta_data ?? null,
       });
       form.reset();
       refreshDisplayDescription();
@@ -186,6 +188,8 @@ export function ContentSourceEditor(props: {
       keys: {
         access_key: '',
       },
+      deprecated: null as boolean | null,
+      meta_data: null as { [key: string]: any } | null,
     },
   });
 
@@ -227,7 +231,7 @@ export function ContentSourceEditor(props: {
             <RichTextInput
               label='Description'
               required
-              value={description ?? toHTML(form.values.description)}
+              value={description ?? toHTML(form.values.description) ?? undefined}
               onChange={(text, json) => {
                 setDescription(json);
                 form.setFieldValue('description', text);
@@ -239,7 +243,7 @@ export function ContentSourceEditor(props: {
           <Divider
             label={
               <Group gap={3} wrap='nowrap'>
-                <Button variant={openedOperations ? 'light' : 'subtle'} size='compact-sm' color='gray.6'>
+                <Button variant={openedOperations ? 'filled' : 'subtle'} size='compact-sm' color='gray'>
                   Operations
                 </Button>
                 {form.values.operations && form.values.operations.length > 0 && (
@@ -424,6 +428,7 @@ export function CreateContentSourceModal(props: {
       artwork_url: values.artwork_url,
       required_content_sources: data?.source.required_content_sources ?? [],
       meta_data: data?.source.meta_data ?? {},
+      deprecated: data?.source.deprecated ?? null,
     });
     showNotification({
       title: `Updated ${values.name}`,
@@ -920,8 +925,8 @@ export function CreateContentSourceModal(props: {
 function ContentList<
   T extends {
     name: string;
-    level?: number;
-    rank?: number;
+    level?: number | null;
+    rank?: number | null;
     type?: AbilityBlockType;
   },
 >(props: {
@@ -935,7 +940,7 @@ function ContentList<
   const theme = useMantineTheme();
   const [openedId, setOpenedId] = useState<number | undefined>();
   const [loading, setLoading] = useState(false);
-  const [_drawer, openDrawer] = useRecoilState(drawerState);
+  const [_drawer, openDrawer] = useAtom(drawerState);
 
   const [searchQuery, setSearchQuery] = useDebouncedState('', 200);
   const search = useRef(new JsSearch.Search('id'));
@@ -957,11 +962,11 @@ function ContentList<
 
     // Sort by level/rank then name
     content = content.sort((a, b) => {
-      if (a.level !== undefined && b.level !== undefined) {
+      if (a.level !== null && b.level !== null && a.level !== undefined && b.level !== undefined) {
         if (a.level !== b.level) {
           return a.level - b.level;
         }
-      } else if (a.rank !== undefined && b.rank !== undefined) {
+      } else if (a.rank !== null && b.rank !== null && a.rank !== undefined && b.rank !== undefined) {
         if (a.rank !== b.rank) {
           return a.rank - b.rank;
         }
@@ -975,7 +980,9 @@ function ContentList<
   const handleReset = () => {
     const query = searchQuery;
     setSearchQuery('');
-    resetContentStore(false);
+    // Homebrew content may have just been edited here, so drop the persisted cache too
+    // (clearPersisted) to force a fresh fetch rather than re-hydrating stale content.
+    resetContentStore(false, true);
     setTimeout(() => {
       setOpenedId(undefined);
       initJsSearch();

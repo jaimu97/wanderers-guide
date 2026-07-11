@@ -26,8 +26,8 @@ import {
 } from '@mantine/core';
 import { StatButton } from '@pages/character_builder/CharBuilderCreation';
 import { IconExternalLink } from '@tabler/icons-react';
-import { ContentPackage, PublicUser } from '@typing/content';
-import { VariableListStr, VariableProf, VariableStr } from '@typing/variables';
+import { ContentPackage, PublicUser } from '@schemas/content';
+import { VariableListStr, VariableProf, VariableStr } from '@schemas/variables';
 import { displayFinalProfValue } from '@variables/variable-display';
 import {
   getVariable,
@@ -38,13 +38,13 @@ import {
   getAllAncestryTraitVariables,
 } from '@variables/variable-manager';
 import { compileProficiencyType, variableToLabel } from '@variables/variable-utils';
-import { useRecoilState, useRecoilValue } from 'recoil';
+import { useAtom, useAtomValue } from 'jotai';
 import classes from '@css/FaqSimple.module.css';
 import { isPhoneSized } from '@utils/mobile-responsive';
 import { useDebouncedState, useDebouncedValue, useDidUpdate } from '@mantine/hooks';
 import { makeRequest } from '@requests/request-manager';
 import { useMutation } from '@tanstack/react-query';
-import { JSendResponse } from '@typing/requests';
+import { JSendResponse } from '@schemas/requests';
 import { useState } from 'react';
 import { getCachedPublicUser, getPublicUser } from '@auth/user-manager';
 import { CreateSocietyAdventureEntryModal } from '@modals/CreateSocietyAdventureEntryModal';
@@ -53,15 +53,17 @@ import { pluralize, toLabel } from '@utils/strings';
 import TraitsDisplay from '@common/TraitsDisplay';
 import { convertToSize } from '@upload/foundry-utils';
 import { cloneDeep } from 'lodash-es';
+import { IMPRINT_BG_COLOR, IMPRINT_BORDER_COLOR } from '@constants/data';
+import ImprintButton from '@common/ImprintButton';
 
 const SECTION_WIDTH = 280;
 
 export default function DetailsPanel(props: { content: ContentPackage; panelHeight: number; panelWidth: number }) {
   const theme = useMantineTheme();
   const isPhone = isPhoneSized(props.panelWidth);
-  const [_drawer, openDrawer] = useRecoilState(drawerState);
+  const [_drawer, openDrawer] = useAtom(drawerState);
 
-  const [character, setCharacter] = useRecoilState(characterState);
+  const [character, setCharacter] = useAtom(characterState);
 
   const languages = (getVariable<VariableListStr>('CHARACTER', 'LANGUAGE_IDS')?.value ?? []).map((langId) => {
     const lang = props.content.languages.find((lang) => `${lang.id}` === langId);
@@ -146,6 +148,12 @@ export default function DetailsPanel(props: { content: ContentPackage; panelHeig
                           appearance: e.target.value,
                         });
                       }}
+                      styles={{
+                        input: {
+                          backgroundColor: IMPRINT_BG_COLOR,
+                          borderColor: IMPRINT_BORDER_COLOR,
+                        },
+                      }}
                     />
                     <Textarea
                       label='Personality'
@@ -158,6 +166,12 @@ export default function DetailsPanel(props: { content: ContentPackage; panelHeig
                           ...character.details?.info,
                           personality: e.target.value,
                         });
+                      }}
+                      styles={{
+                        input: {
+                          backgroundColor: IMPRINT_BG_COLOR,
+                          borderColor: IMPRINT_BORDER_COLOR,
+                        },
                       }}
                     />
                     <Textarea
@@ -172,6 +186,12 @@ export default function DetailsPanel(props: { content: ContentPackage; panelHeig
                           alignment: e.target.value,
                         });
                       }}
+                      styles={{
+                        input: {
+                          backgroundColor: IMPRINT_BG_COLOR,
+                          borderColor: IMPRINT_BORDER_COLOR,
+                        },
+                      }}
                     />
                     <Textarea
                       label='Beliefs'
@@ -184,6 +204,12 @@ export default function DetailsPanel(props: { content: ContentPackage; panelHeig
                           ...character.details?.info,
                           beliefs: e.target.value,
                         });
+                      }}
+                      styles={{
+                        input: {
+                          backgroundColor: IMPRINT_BG_COLOR,
+                          borderColor: IMPRINT_BORDER_COLOR,
+                        },
                       }}
                     />
                     <Divider mt='sm' />
@@ -198,6 +224,12 @@ export default function DetailsPanel(props: { content: ContentPackage; panelHeig
                           age: e.target.value,
                         });
                       }}
+                      styles={{
+                        input: {
+                          backgroundColor: IMPRINT_BG_COLOR,
+                          borderColor: IMPRINT_BORDER_COLOR,
+                        },
+                      }}
                     />
                     <TextInput
                       label='Height'
@@ -209,6 +241,12 @@ export default function DetailsPanel(props: { content: ContentPackage; panelHeig
                           ...character.details?.info,
                           height: e.target.value,
                         });
+                      }}
+                      styles={{
+                        input: {
+                          backgroundColor: IMPRINT_BG_COLOR,
+                          borderColor: IMPRINT_BORDER_COLOR,
+                        },
                       }}
                     />
                     <TextInput
@@ -222,6 +260,12 @@ export default function DetailsPanel(props: { content: ContentPackage; panelHeig
                           weight: e.target.value,
                         });
                       }}
+                      styles={{
+                        input: {
+                          backgroundColor: IMPRINT_BG_COLOR,
+                          borderColor: IMPRINT_BORDER_COLOR,
+                        },
+                      }}
                     />
                     <TextInput
                       label='Gender'
@@ -234,6 +278,12 @@ export default function DetailsPanel(props: { content: ContentPackage; panelHeig
                           gender: e.target.value,
                         });
                       }}
+                      styles={{
+                        input: {
+                          backgroundColor: IMPRINT_BG_COLOR,
+                          borderColor: IMPRINT_BORDER_COLOR,
+                        },
+                      }}
                     />
                     <TextInput
                       label='Pronouns'
@@ -245,6 +295,12 @@ export default function DetailsPanel(props: { content: ContentPackage; panelHeig
                           ...character.details?.info,
                           pronouns: e.target.value,
                         });
+                      }}
+                      styles={{
+                        input: {
+                          backgroundColor: IMPRINT_BG_COLOR,
+                          borderColor: IMPRINT_BORDER_COLOR,
+                        },
                       }}
                     />
                     <Divider mt='sm' />
@@ -259,6 +315,12 @@ export default function DetailsPanel(props: { content: ContentPackage; panelHeig
                           faction: e.target.value,
                         });
                       }}
+                      styles={{
+                        input: {
+                          backgroundColor: IMPRINT_BG_COLOR,
+                          borderColor: IMPRINT_BORDER_COLOR,
+                        },
+                      }}
                     />
                     <TextInput
                       label='Ethnicity'
@@ -270,6 +332,12 @@ export default function DetailsPanel(props: { content: ContentPackage; panelHeig
                           ...character.details?.info,
                           ethnicity: e.target.value,
                         });
+                      }}
+                      styles={{
+                        input: {
+                          backgroundColor: IMPRINT_BG_COLOR,
+                          borderColor: IMPRINT_BORDER_COLOR,
+                        },
                       }}
                     />
                     <TextInput
@@ -283,6 +351,12 @@ export default function DetailsPanel(props: { content: ContentPackage; panelHeig
                           nationality: e.target.value,
                         });
                       }}
+                      styles={{
+                        input: {
+                          backgroundColor: IMPRINT_BG_COLOR,
+                          borderColor: IMPRINT_BORDER_COLOR,
+                        },
+                      }}
                     />
                     <TextInput
                       label='Birthplace'
@@ -294,6 +368,12 @@ export default function DetailsPanel(props: { content: ContentPackage; panelHeig
                           ...character.details?.info,
                           birthplace: e.target.value,
                         });
+                      }}
+                      styles={{
+                        input: {
+                          backgroundColor: IMPRINT_BG_COLOR,
+                          borderColor: IMPRINT_BORDER_COLOR,
+                        },
                       }}
                     />
                   </Stack>
@@ -339,8 +419,8 @@ export default function DetailsPanel(props: { content: ContentPackage; panelHeig
                         cursor: 'pointer',
                       },
                       root: {
-                        border: `1px solid ${theme.colors.dark[4]}`,
-                        backgroundColor: theme.colors.dark[6],
+                        border: `1px solid ${IMPRINT_BORDER_COLOR}`,
+                        backgroundColor: IMPRINT_BG_COLOR,
                       },
                     }}
                     onClick={() => {
@@ -371,8 +451,8 @@ export default function DetailsPanel(props: { content: ContentPackage; panelHeig
                         cursor: 'pointer',
                       },
                       root: {
-                        border: `1px solid ${theme.colors.dark[4]}`,
-                        backgroundColor: theme.colors.dark[6],
+                        border: `1px solid ${IMPRINT_BORDER_COLOR}`,
+                        backgroundColor: IMPRINT_BG_COLOR,
                       },
                     }}
                     onClick={() => {
@@ -852,7 +932,7 @@ export default function DetailsPanel(props: { content: ContentPackage; panelHeig
 }
 
 function OrgPlaySection(props: { setDebouncedInfo: (info: any) => void }) {
-  const character = useRecoilValue(characterState);
+  const character = useAtomValue(characterState);
 
   const [openedAdventureId, setOpenedAdventureId] = useState<string | null>(null);
   const [user, setUser] = useState<PublicUser | null>(getCachedPublicUser());
@@ -908,6 +988,12 @@ function OrgPlaySection(props: { setDebouncedInfo: (info: any) => void }) {
             <IconExternalLink style={{ width: '70%', height: '70%' }} stroke={1.5} />
           </ActionIcon>
         }
+        styles={{
+          input: {
+            backgroundColor: IMPRINT_BG_COLOR,
+            borderColor: IMPRINT_BORDER_COLOR,
+          },
+        }}
       />
       <Divider mt='sm' />
       <Group wrap='nowrap'>
@@ -930,6 +1016,12 @@ function OrgPlaySection(props: { setDebouncedInfo: (info: any) => void }) {
               faction: val,
             });
           }}
+          styles={{
+            input: {
+              backgroundColor: IMPRINT_BG_COLOR,
+              borderColor: IMPRINT_BORDER_COLOR,
+            },
+          }}
         />
         <NumberInput
           w='30%'
@@ -943,14 +1035,19 @@ function OrgPlaySection(props: { setDebouncedInfo: (info: any) => void }) {
               reputation: parseInt(`${val}`),
             });
           }}
+          styles={{
+            input: {
+              backgroundColor: IMPRINT_BG_COLOR,
+              borderColor: IMPRINT_BORDER_COLOR,
+            },
+          }}
         />
       </Group>
       <Divider my='sm' />
       <Paper
-        withBorder
         p='xs'
         style={{
-          backgroundColor: `#212226`,
+          backgroundColor: IMPRINT_BG_COLOR,
         }}
       >
         <Group wrap='nowrap' justify='space-between'>
@@ -962,7 +1059,7 @@ function OrgPlaySection(props: { setDebouncedInfo: (info: any) => void }) {
               <Text fz='xs'>{(character?.details?.info?.organized_play_adventures ?? []).length}</Text>
             </Badge>
           </Group>
-          <Button
+          <ImprintButton
             size='compact-sm'
             variant='filled'
             radius={'xl'}
@@ -971,7 +1068,7 @@ function OrgPlaySection(props: { setDebouncedInfo: (info: any) => void }) {
             }}
           >
             Add
-          </Button>
+          </ImprintButton>
         </Group>
         <Divider my={8} />
         <SimpleGrid cols={4} spacing={0}>

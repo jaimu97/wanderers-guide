@@ -1,6 +1,7 @@
 import { corsHeaders } from './cors.ts';
 import { SupabaseClient, createClient } from '@supabase/supabase-js';
 import { uniqueId } from './upload-utils.ts';
+import { bucketFor, checkRateLimit, rateLimitHeaders } from './rate-limit.ts';
 import _ from 'lodash';
 // @ts-ignore
 import { SignJWT } from 'npm:jose@5.9.6';
@@ -23,6 +24,13 @@ export async function connect<T = Record<string, any>>(
   ) => Promise<JSendResponse>,
   options?: {
     supportsCharacterAPI?: boolean;
+    /**
+     * Skip the JWT / API-key auth routing. Use for service-to-service endpoints
+     * (e.g. Discord webhooks) whose Authorization header carries a shared secret
+     * the handler validates itself. The handler still receives the raw token as
+     * its third argument, and the supplied client is anon-keyed (no Auth context).
+     */
+    bypassAuth?: boolean;
   }
 ) {
   if (req.method === 'OPTIONS') {
@@ -35,14 +43,61 @@ export async function connect<T = Record<string, any>>(
     // Create a Supabase client with the Auth context of the logged in user.
     const rawAuthHeader = req.headers.get('Authorization')?.trim() ?? '';
     const token = rawAuthHeader.replace('Bearer ', '').trim();
+    const is36 = token.length === 36 && !options?.bypassAuth;
+    // A JWT is `header.payload.signature` — three base64url segments. Anything
+    // else handed to PostgREST surfaces an opaque "JWSError" 500 from the DB
+    // layer (see helpers.ts history). Reject upfront with a useful 401 so the
+    // common copy-paste-the-placeholder mistake produces actionable output.
+    const looksLikeJwt = token.split('.').length === 3;
+    if (token && !is36 && !looksLikeJwt && !options?.bypassAuth) {
+      return new Response(
+        JSON.stringify({
+          status: 'fail',
+          data: {
+            message:
+              'Invalid token format. Expected a 36-character API key (UUID) or a JWT. See https://docs.wanderersguide.app/api-reference/authentication.',
+          },
+        } satisfies JSendResponse),
+        {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          status: 401,
+        }
+      );
+    }
 
-    if (token.length === 36) {
+    // Rate limit per token / IP. See rate-limit.ts for tunables.
+    const ip = (req.headers.get('x-forwarded-for') ?? req.headers.get('cf-connecting-ip') ?? '')
+      .split(',')[0]
+      .trim();
+    const { bucket, limit } = bucketFor({ token, is36, bypassAuth: options?.bypassAuth, ip });
+    const rl = checkRateLimit(bucket, limit);
+    const rlHeaders = rateLimitHeaders(rl);
+    if (!rl.allowed) {
+      return new Response(
+        JSON.stringify({
+          status: 'fail',
+          data: { message: `Rate limit exceeded. Try again in ${rl.resetSeconds}s.` },
+        } satisfies JSendResponse),
+        {
+          headers: { ...corsHeaders, ...rlHeaders, 'Content-Type': 'application/json' },
+          status: 429,
+        }
+      );
+    }
+
+    if (is36) {
       // Assume it's an API key - so this request is coming from someone trying to access the API directly.
 
-      return await handleApiRouting<T>(token, body, executeFn, options?.supportsCharacterAPI);
+      return await handleApiRouting<T>(
+        token,
+        body,
+        executeFn,
+        options?.supportsCharacterAPI,
+        rlHeaders
+      );
       //
     } else {
-      // Normal JWT request, this request is coming from the frontend.
+      // Normal JWT request (or bypassAuth: shared-secret webhook).
 
       const supabaseClient = createClient(
         // Supabase API URL - env var exported by default.
@@ -51,19 +106,22 @@ export async function connect<T = Record<string, any>>(
         // Supabase API ANON KEY - env var exported by default.
         // @ts-ignore
         Deno.env.get('SUPABASE_ANON_KEY') ?? '',
-        // Create client with Auth context of the user that called the function.
-        // This way row-level-security (RLS) policies are applied.
-        {
-          global: {
-            headers: { Authorization: rawAuthHeader },
-          },
-        }
+        options?.bypassAuth
+          ? // No Auth context - the handler validates its own shared-secret token.
+            {}
+          : {
+              // Create client with Auth context of the user that called the function.
+              // This way row-level-security (RLS) policies are applied.
+              global: {
+                headers: { Authorization: rawAuthHeader },
+              },
+            }
       );
 
       const results = await executeFn(supabaseClient, body, token);
 
       return new Response(JSON.stringify(results), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        headers: { ...corsHeaders, ...rlHeaders, 'Content-Type': 'application/json' },
         status: 200,
       });
       //
@@ -91,7 +149,8 @@ async function handleApiRouting<T = Record<string, any>>(
     body: T,
     token: string
   ) => Promise<JSendResponse>,
-  supportsCharacterAPI?: boolean
+  supportsCharacterAPI?: boolean,
+  rlHeaders: Record<string, string> = {}
 ): Promise<Response> {
   const adminClient = createClient(
     // @ts-ignore
@@ -115,7 +174,7 @@ async function handleApiRouting<T = Record<string, any>>(
         },
       } satisfies JSendResponse),
       {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        headers: { ...corsHeaders, ...rlHeaders, 'Content-Type': 'application/json' },
         status: 401,
       }
     );
@@ -133,7 +192,7 @@ async function handleApiRouting<T = Record<string, any>>(
         },
       } satisfies JSendResponse),
       {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        headers: { ...corsHeaders, ...rlHeaders, 'Content-Type': 'application/json' },
         status: 401,
       }
     );
@@ -166,7 +225,7 @@ async function handleApiRouting<T = Record<string, any>>(
           },
         } satisfies JSendResponse),
         {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          headers: { ...corsHeaders, ...rlHeaders, 'Content-Type': 'application/json' },
           status: 403,
         }
       );
@@ -184,7 +243,7 @@ async function handleApiRouting<T = Record<string, any>>(
         message: 'Failed to retrieve user data',
       } satisfies JSendResponse),
       {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        headers: { ...corsHeaders, ...rlHeaders, 'Content-Type': 'application/json' },
         status: 500,
       }
     );
@@ -212,15 +271,18 @@ async function handleApiRouting<T = Record<string, any>>(
   const results = await executeFn(supabaseClient, body, limitedUserToken);
 
   return new Response(JSON.stringify(results), {
-    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    headers: { ...corsHeaders, ...rlHeaders, 'Content-Type': 'application/json' },
     status: 200,
   });
 }
 
 async function generateUserJWT(userId: string) {
+  // Production sets SB_JWT_SECRET; the dockerized self-hosted stack sets JWT_SECRET
+  // (since `SUPABASE_*` is the reserved prefix the runtime treats specially).
+  // Accept either so both flows work without docker-compose changes.
   // @ts-ignore
-  const JWT_SECRET = Deno.env.get('SB_JWT_SECRET');
-  if (!JWT_SECRET) throw new Error('Missing SB_JWT_SECRET');
+  const JWT_SECRET = Deno.env.get('SB_JWT_SECRET') ?? Deno.env.get('JWT_SECRET');
+  if (!JWT_SECRET) throw new Error('Missing SB_JWT_SECRET / JWT_SECRET');
 
   const key = new TextEncoder().encode(JWT_SECRET);
 
@@ -718,8 +780,17 @@ export async function updateData(
   tableName: TableName,
   id: number,
   data: Record<string, undefined | null | string | number | boolean | Record<string, any>>,
-  returnData?: boolean
-): Promise<{ status: 'SUCCESS' | 'ERROR_DUPLICATE' | 'ERROR_UNKNOWN'; data: any }> {
+  returnData?: boolean,
+  options?: {
+    /**
+     * Optimistic-concurrency guard. The UPDATE additionally matches
+     * `guard.column = guard.value`; if no row matches (the column changed since the
+     * caller last read it) the write is skipped and a CONFLICT status is returned
+     * instead of silently overwriting newer data.
+     */
+    guard?: { column: string; value: string | number };
+  }
+): Promise<{ status: 'SUCCESS' | 'ERROR_DUPLICATE' | 'ERROR_UNKNOWN' | 'CONFLICT'; data: any }> {
   // Trim all string values
   for (let key in data) {
     const value = data[key];
@@ -754,12 +825,21 @@ export async function updateData(
   let error: any = null;
   let dataResult: any = null;
 
-  if (returnData) {
-    const res = await client.from(tableName).update(data).eq('id', id).select();
+  // When guarding we must always read back the affected rows so we can tell a
+  // concurrency conflict (0 rows matched the guard) apart from a successful write.
+  const needsSelect = returnData || !!options?.guard;
+
+  let query = client.from(tableName).update(data).eq('id', id);
+  if (options?.guard) {
+    query = query.eq(options.guard.column, options.guard.value);
+  }
+
+  if (needsSelect) {
+    const res = await query.select();
     error = res.error;
     dataResult = res.data;
   } else {
-    const res = await client.from(tableName).update(data).eq('id', id);
+    const res = await query;
     error = res.error;
   }
   if (error) {
@@ -770,6 +850,12 @@ export async function updateData(
       throw error;
       return { status: 'ERROR_UNKNOWN', data: dataResult };
     }
+  }
+
+  // Guarded update that matched no rows = the row changed since the caller's snapshot.
+  // (Distinguishing this from a non-existent / RLS-hidden row is left to the caller.)
+  if (options?.guard && Array.isArray(dataResult) && dataResult.length === 0) {
+    return { status: 'CONFLICT', data: null };
   }
 
   return { status: 'SUCCESS', data: dataResult };

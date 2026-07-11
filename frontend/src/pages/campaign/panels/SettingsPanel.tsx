@@ -36,7 +36,7 @@ import {
   IconHexagonalPrism,
 } from '@tabler/icons-react';
 import { useState } from 'react';
-import { useRecoilState } from 'recoil';
+import { useAtom } from 'jotai';
 import { useQuery } from '@tanstack/react-query';
 import {
   defineDefaultSources,
@@ -46,10 +46,11 @@ import {
 } from '@content/content-store';
 import { getPublicUser } from '@auth/user-manager';
 import BlurButton from '@common/BlurButton';
+import { IMPRINT_BG_COLOR, IMPRINT_BORDER_COLOR } from '@constants/data';
 import OperationsModal from '@modals/OperationsModal';
 import { phoneQuery } from '@utils/mobile-responsive';
 import { drawerState } from '@atoms/navAtoms';
-import { Campaign, Character } from '@typing/content';
+import { Campaign, Character } from '@schemas/content';
 import { userState } from '@atoms/userAtoms';
 import { isValidImage } from '@utils/images';
 import { makeRequest } from '@requests/request-manager';
@@ -68,11 +69,11 @@ export default function SettingsPanel(props: {
 
   const [isValidImageURL, setIsValidImageURL] = useState(true);
 
-  const [_drawer, openDrawer] = useRecoilState(drawerState);
+  const [_drawer, openDrawer] = useAtom(drawerState);
 
   const [openedOperations, setOpenedOperations] = useState(false);
 
-  const [user, setUser] = useRecoilState(userState);
+  const [user, setUser] = useAtom(userState);
   useQuery({
     queryKey: [`find-account-self`],
     queryFn: async () => {
@@ -391,7 +392,7 @@ export default function SettingsPanel(props: {
                   />
                 ))}
                 {(!user?.subscribed_content_sources || user?.subscribed_content_sources?.length === 0) && (
-                  <Text c='gray.5' fz='sm' ta='center' fs='italic' py={20}>
+                  <Text c='gray.2' fz='sm' ta='center' fs='italic' py={20}>
                     No subscribed bundles found.{' '}
                     <Anchor fz='sm' href='/homebrew'>
                       Go add some!
@@ -725,6 +726,9 @@ export default function SettingsPanel(props: {
                 name: e.currentTarget.value,
               });
             }}
+            styles={{
+              input: { backgroundColor: IMPRINT_BG_COLOR, borderColor: IMPRINT_BORDER_COLOR },
+            }}
           />
           <Textarea
             label='Description'
@@ -732,12 +736,15 @@ export default function SettingsPanel(props: {
             minRows={4}
             maxRows={4}
             autosize
-            value={props.campaign.description}
+            value={props.campaign.description ?? undefined}
             onChange={(e) => {
               props.setCampaign({
                 ...props.campaign,
                 description: e.currentTarget.value,
               });
+            }}
+            styles={{
+              input: { backgroundColor: IMPRINT_BG_COLOR, borderColor: IMPRINT_BORDER_COLOR },
             }}
           />
 
@@ -762,6 +769,9 @@ export default function SettingsPanel(props: {
                 },
               });
             }}
+            styles={{
+              input: { backgroundColor: IMPRINT_BG_COLOR, borderColor: IMPRINT_BORDER_COLOR },
+            }}
           />
 
           <TextInput
@@ -778,6 +788,9 @@ export default function SettingsPanel(props: {
               });
             }}
             error={isValidImageURL ? false : 'Invalid URL'}
+            styles={{
+              input: { backgroundColor: IMPRINT_BG_COLOR, borderColor: IMPRINT_BORDER_COLOR },
+            }}
           />
 
           <Menu shadow='md' width={260}>

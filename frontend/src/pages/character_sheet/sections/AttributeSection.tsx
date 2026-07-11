@@ -3,12 +3,16 @@ import { drawerState } from '@atoms/navAtoms';
 import BlurBox from '@common/BlurBox';
 import BlurButton from '@common/BlurButton';
 import { useMantineTheme, Group, SimpleGrid, Button, Box, Text } from '@mantine/core';
-import { LivingEntity } from '@typing/content';
-import { StoreID } from '@typing/variables';
+import { LivingEntity } from '@schemas/content';
+import { StoreID } from '@schemas/variables';
 import { toLabel } from '@utils/strings';
 import { displayAttributeValue } from '@variables/variable-display';
 import { useNavigate } from 'react-router-dom';
-import { SetterOrUpdater, useRecoilState } from 'recoil';
+import { useAtom } from 'jotai';
+import { SetterOrUpdater } from '@utils/type-fixing';
+import { glassStyle } from '@utils/colors';
+import { IMPRINT_BG_COLOR } from '@constants/data';
+import ImprintButton from '@common/ImprintButton';
 
 export default function AttributeSection(props: {
   id: StoreID;
@@ -18,7 +22,7 @@ export default function AttributeSection(props: {
   const navigate = useNavigate();
   const theme = useMantineTheme();
 
-  const [_drawer, openDrawer] = useRecoilState(drawerState);
+  const [_drawer, openDrawer] = useAtom(drawerState);
 
   // Ordered this way so it's in two columns of physical & mental
   const attributes = [
@@ -35,7 +39,7 @@ export default function AttributeSection(props: {
   };
 
   return (
-    <BlurBox blur={10}>
+    <BlurBox>
       <Box
         px='xs'
         py={10}
@@ -50,21 +54,25 @@ export default function AttributeSection(props: {
           <SimpleGrid cols={2} spacing='sm' verticalSpacing={8}>
             {attributes.map((attribute, index) => (
               <Button.Group key={index}>
-                <BlurButton
+                <ImprintButton
+                  radius='xl'
                   size='compact-xs'
                   fw={400}
-                  onClick={() => {
-                    handleAttributeOpen(attribute);
+                  c='gray.0'
+                  noBorder
+                  style={{
+                    flex: 1,
                   }}
+                  onClick={() => handleAttributeOpen(attribute)}
                 >
                   {toLabel(attribute)}
-                </BlurButton>
-                <Button
+                </ImprintButton>
+                <ImprintButton
                   radius='xl'
-                  variant='light'
-                  color='dark.2'
                   size='compact-xs'
                   w={35}
+                  multiplier={2}
+                  noBorder
                   onClick={() => {
                     handleAttributeOpen(attribute);
                   }}
@@ -74,7 +82,7 @@ export default function AttributeSection(props: {
                     ta: 'center',
                     fz: 'xs',
                   })}
-                </Button>
+                </ImprintButton>
               </Button.Group>
             ))}
           </SimpleGrid>

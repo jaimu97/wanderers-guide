@@ -4,28 +4,31 @@ import RichText from '@common/RichText';
 import TraitsDisplay from '@common/TraitsDisplay';
 import { fetchContentById } from '@content/content-store';
 import ShowOperationsButton from '@drawers/ShowOperationsButton';
-import { Anchor, Box, Button, Group, Image, Loader, Paper, Stack, Text, Title, useMantineTheme } from '@mantine/core';
-import { OperationResult } from '@typing/operations';
+import { Anchor, Box, Button, Group, Image, Loader, Stack, Text, Title, useMantineTheme } from '@mantine/core';
+import { IMPRINT_BG_COLOR, IMPRINT_BORDER_COLOR } from '@constants/data';
+import { OperationResult } from '@schemas/operations';
 import { useQuery } from '@tanstack/react-query';
-import { Background, Character } from '@typing/content';
-import { DrawerType } from '@typing/index';
+import { Background, Character } from '@schemas/content';
+import { DrawerType } from '@schemas/index';
 import { getStatBlockDisplay } from '@variables/initial-stats-display';
 import { getAllAttributeVariables } from '@variables/variable-manager';
 import { useState } from 'react';
-import { SetterOrUpdater, useRecoilState } from 'recoil';
+import { useAtom } from 'jotai';
+import { SetterOrUpdater } from '@utils/type-fixing';
+import { DrawerStateSet } from '@common/rich_text_input/ContentLinkExtension';
 
 export function BackgroundDrawerTitle(props: {
   data: { id?: number; background?: Background; onSelect?: () => void };
 }) {
   const id = props.data.id;
 
-  const [_drawer, openDrawer] = useRecoilState(drawerState);
+  const [_drawer, openDrawer] = useAtom(drawerState);
 
   const { data: _background } = useQuery({
     queryKey: [`find-background-${id}`, { id }],
     queryFn: async ({ queryKey }) => {
       // @ts-ignore
-      // eslint-disable-next-line
+       
       const [_key, { id }] = queryKey;
       return await fetchContentById<Background>('background', id);
     },
@@ -73,7 +76,7 @@ export function BackgroundDrawerContent(props: {
     queryKey: [`find-background-details-${id}`, { id }],
     queryFn: async ({ queryKey }) => {
       // @ts-ignore
-      // eslint-disable-next-line
+       
       const [_key, { id }] = queryKey;
       const background = await fetchContentById<Background>('background', id);
       return {
@@ -82,7 +85,7 @@ export function BackgroundDrawerContent(props: {
     },
   });
 
-  const [_drawer, openDrawer] = useRecoilState(drawerState);
+  const [_drawer, openDrawer] = useAtom(drawerState);
 
   if (!data || !data.background) {
     return (
@@ -102,7 +105,7 @@ export function BackgroundDrawerContent(props: {
     <Stack>
       <BackgroundInitialOverview background={data.background} mode='READ' />
       {props.data.showOperations && (
-        <ShowOperationsButton name={data.background.name} operations={data.background.operations} />
+        <ShowOperationsButton name={data.background.name} operations={data.background.operations ?? undefined} />
       )}
     </Stack>
   );
@@ -115,8 +118,8 @@ export function BackgroundInitialOverview(props: {
 }) {
   const theme = useMantineTheme();
   const [descHidden, setDescHidden] = useState(true);
-  const charState = useRecoilState(characterState);
-  const [_drawer, openDrawer] = useRecoilState(drawerState);
+  const charState = useAtom(characterState);
+  const [_drawer, openDrawer] = useAtom(drawerState);
 
   // Reading thru operations to get display UI
   const MODE = props.mode;
@@ -192,23 +195,22 @@ export function BackgroundInitialOverview(props: {
               return (a.uuid ?? '').localeCompare(b.uuid ?? '');
             })
             .map((attribute, index) => (
-              <Paper
+              <Box
                 key={index}
-                shadow='xs'
                 p='sm'
-                radius='md'
                 style={{
-                  backgroundColor: theme.colors.dark[8],
-                  position: 'relative',
+                  backgroundColor: IMPRINT_BG_COLOR,
+                  border: `1px solid ${IMPRINT_BORDER_COLOR}`,
+                  borderRadius: theme.radius.md,
                 }}
               >
-                <Text c='gray.5' ta='center'>
+                <Text c='gray.2' ta='center'>
                   Attribute Boost
                 </Text>
                 <Text c='gray.4' fw={700} ta='center' style={{ display: 'flex', justifyContent: 'center' }}>
                   {attribute.ui}
                 </Text>
-              </Paper>
+              </Box>
             ))}
         </Group>
       </Box>
@@ -222,11 +224,7 @@ export function convertBackgroundOperationsIntoUI(
   mode: 'READ' | 'READ/WRITE',
   operationResults: OperationResult[],
   charState: [Character | null, SetterOrUpdater<Character | null>],
-  openDrawer: SetterOrUpdater<{
-    type: DrawerType;
-    data: any;
-    extra?: any;
-  } | null>
+  openDrawer: DrawerStateSet
 ) {
   const backgroundOperations = background.operations ?? [];
   const MODE = mode;

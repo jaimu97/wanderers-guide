@@ -26,8 +26,8 @@ import {
   IconTimeline,
 } from '@tabler/icons-react';
 import { useQuery } from '@tanstack/react-query';
-import { AbilityBlock } from '@typing/content';
-import { StoreID, VariableBool, VariableProf } from '@typing/variables';
+import { AbilityBlock } from '@schemas/content';
+import { StoreID, VariableBool, VariableProf } from '@schemas/variables';
 import { sign } from '@utils/numbers';
 import { toLabel } from '@utils/strings';
 import { displayFinalProfValue } from '@variables/variable-display';
@@ -41,7 +41,7 @@ import {
   proficiencyTypeToLabel,
   variableToLabel,
 } from '@variables/variable-utils';
-import { useRecoilState } from 'recoil';
+import { useAtom } from 'jotai';
 import { titleCase } from 'title-case';
 
 export function StatProfDrawerTitle(props: { data: { id: StoreID; variableName: string; isDC?: boolean } }) {
@@ -57,7 +57,9 @@ export function StatProfDrawerTitle(props: { data: { id: StoreID; variableName: 
             </Box>
           </Group>
           <Box>
-            <Badge>{proficiencyTypeToLabel(compileProficiencyType(variable.value))}</Badge>
+            <Badge color='gray' tt='none' size='lg'>
+              {proficiencyTypeToLabel(compileProficiencyType(variable.value))}
+            </Badge>
           </Box>
         </Group>
       )}
@@ -347,17 +349,17 @@ function getProfDescription(variableName: string) {
   }
 
   if (variableName === 'SAVE_FORT') {
-    return `A Fortitude saving throw is used when your character’s health or vitality is under attack, such as from poison or disease.`;
+    return `A Fortitude saving throw is used when your character’s health or vitality is under attack, such as from ${convertToHardcodedLink('trait', 'poison')} or ${convertToHardcodedLink('trait', 'disease')}.`;
   }
   if (variableName === 'SAVE_REFLEX') {
-    return `A Reflex saving throw is called for when your character must dodge away from danger, usually something that affects a large area, such as the scorching blast of a fireball spell.`;
+    return `A Reflex saving throw is called for when your character must dodge away from danger, usually something that affects a large area, such as the scorching blast of a ${convertToHardcodedLink('spell', 'Fireball', 'fireball')} spell.`;
   }
   if (variableName === 'SAVE_WILL') {
-    return `A Will saving throw is often your defense against spells and effects that target your character’s mind, such as a charm or confusion spell.`;
+    return `A Will saving throw is often your defense against spells and effects that target your character’s mind, such as a ${convertToHardcodedLink('spell', 'Charm', 'charm')} or ${convertToHardcodedLink('spell', 'Confusion', 'confusion')} spell.`;
   }
 
   if (variableName === 'SKILL_ACROBATICS') {
-    return `Acrobatics measures your ability to perform tasks requiring coordination and grace. When you use the ${convertToHardcodedLink('action', 'Escape')} basic action, you can use your Acrobatics modifier instead of your unarmed attack modifier. You can also use it for the basic actions Arrest a Fall (page 418) and Grab an Edge (page 418) instead of Reflex.`;
+    return `Acrobatics measures your ability to perform tasks requiring coordination and grace. When you use the ${convertToHardcodedLink('action', 'Escape')} basic action, you can use your Acrobatics modifier instead of your unarmed attack modifier. You can also use it for the basic actions ${convertToHardcodedLink('action', 'Arrest a Fall')} and ${convertToHardcodedLink('action', 'Grab an Edge')} instead of Reflex.`;
   }
   if (variableName === 'SKILL_ARCANA') {
     return `Arcana measures how much you know about arcane magic and creatures. Even if you’re untrained, you can ${convertToHardcodedLink('action', 'Recall Knowledge')}.`;
@@ -378,7 +380,7 @@ function getProfDescription(variableName: string) {
     return `You bend others to your will using threats. Unlike Deception or Diplomacy, Intimidation is typically a blunt instrument with little room for nuance or care.`;
   }
   if (variableName === 'SKILL_MEDICINE') {
-    return `You can patch up wounds and help people recover from diseases and poisons. ${convertToHardcodedLink('action', 'Treat Wounds')} is especially useful, allowing your adventuring party to heal up between fights. It can be made more efficient with skill feats like Continual Recovery (page 254) and Ward Medic (page 265). Even if you’re untrained in Medicine, you can use it to ${convertToHardcodedLink('action', 'Recall Knowledge')}.`;
+    return `You can patch up wounds and help people recover from ${convertToHardcodedLink('trait', 'disease', 'diseases')} and ${convertToHardcodedLink('trait', 'poison', 'poisons')}. ${convertToHardcodedLink('action', 'Treat Wounds')} is especially useful, allowing your adventuring party to heal up between fights. It can be made more efficient with skill feats like ${convertToHardcodedLink('feat', 'Continual Recovery')} and ${convertToHardcodedLink('feat', 'Ward Medic')}. Even if you’re untrained in Medicine, you can use it to ${convertToHardcodedLink('action', 'Recall Knowledge')}.`;
   }
   if (variableName === 'SKILL_NATURE') {
     return `You know about the natural world, and you command and train animals and magical beasts. Even if you’re untrained in Nature, you can use it to ${convertToHardcodedLink('action', 'Recall Knowledge')}.`;
@@ -415,13 +417,13 @@ function getProfDescription(variableName: string) {
 }
 
 function SkillActionsSection(props: { variableName: string }) {
-  const [_drawer, openDrawer] = useRecoilState(drawerState);
+  const [_drawer, openDrawer] = useAtom(drawerState);
 
   const { data: actions } = useQuery({
     queryKey: [`find-skill-actions-${props.variableName}`, { variableName: props.variableName }],
     queryFn: async ({ queryKey }) => {
       // @ts-ignore
-      // eslint-disable-next-line
+       
       const [_key, { variableName }] = queryKey;
       const abilityBlocks = await fetchContentAll<AbilityBlock>('ability-block', getDefaultSources('PAGE'));
       return abilityBlocks.filter((block) => {

@@ -1,5 +1,5 @@
-import { Condition } from '@typing/content';
-import { StoreID, VariableListStr, VariableNum, VariableProf } from '@typing/variables';
+import { Condition } from '@schemas/content';
+import { StoreID, VariableListStr, VariableNum, VariableProf } from '@schemas/variables';
 import {
   addVariableBonus,
   adjVariable,
@@ -496,7 +496,7 @@ function applyCondition(id: StoreID, condition: Condition) {
       'PERCEPTION',
       -2,
       'status',
-      '-2 status penalty to initiative and checks that involve sound but also rely on other senses',
+      'to initiative and checks that involve sound but also rely on other senses',
       'Deafened'
     );
     addVariableBonus(

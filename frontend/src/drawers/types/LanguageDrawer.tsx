@@ -6,7 +6,7 @@ import { fetchContentById } from '@content/content-store';
 import ShowInjectedText from '@drawers/ShowInjectedText';
 import { Title, Text, Image, Loader, Group, Divider, Stack, Box, Flex } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
-import { AbilityBlock, Language } from '@typing/content';
+import { AbilityBlock, Language } from '@schemas/content';
 
 export function LanguageDrawerTitle(props: { data: { id?: number; language?: Language } }) {
   const id = props.data.id;
@@ -15,7 +15,7 @@ export function LanguageDrawerTitle(props: { data: { id?: number; language?: Lan
     queryKey: [`find-language-${id}`, { id }],
     queryFn: async ({ queryKey }) => {
       // @ts-ignore
-      // eslint-disable-next-line
+       
       const [_key, { id }] = queryKey;
       return await fetchContentById<Language>('language', id);
     },
@@ -32,7 +32,7 @@ export function LanguageDrawerTitle(props: { data: { id?: number; language?: Lan
               <Title order={3}>{language.name}</Title>
             </Box>
             <Box>
-              <TraitsDisplay traitIds={[]} rarity={language.rarity} availability={language.availability} />
+              <TraitsDisplay traitIds={[]} rarity={language.rarity} availability={language.availability ?? undefined} />
             </Box>
           </Group>
         </Group>
@@ -48,7 +48,7 @@ export function LanguageDrawerContent(props: { data: { id?: number; language?: L
     queryKey: [`find-language-${id}`, { id }],
     queryFn: async ({ queryKey }) => {
       // @ts-ignore
-      // eslint-disable-next-line
+       
       const [_key, { id }] = queryKey;
       return await fetchContentById<Language>('language', id);
     },
@@ -75,7 +75,7 @@ export function LanguageDrawerContent(props: { data: { id?: number; language?: L
       <Box>
         {language.speakers && (
           <IndentedText ta='justify'>
-            <Text fw={600} c='gray.5' span>
+            <Text fw={600} c='gray.2' span>
               Speakers
             </Text>{' '}
             {language.speakers}
@@ -83,7 +83,7 @@ export function LanguageDrawerContent(props: { data: { id?: number; language?: L
         )}
         {language.script && (
           <IndentedText ta='justify'>
-            <Text fw={600} c='gray.5' span>
+            <Text fw={600} c='gray.2' span>
               Script
             </Text>{' '}
             {language.script}

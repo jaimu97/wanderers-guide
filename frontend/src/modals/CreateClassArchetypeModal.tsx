@@ -33,8 +33,8 @@ import { useDisclosure } from '@mantine/hooks';
 import { IconPlus, IconReplace, IconTrash, IconX } from '@tabler/icons-react';
 import { useQuery } from '@tanstack/react-query';
 import { JSONContent } from '@tiptap/react';
-import { AbilityBlock, Archetype, Class, ClassArchetype, Rarity } from '@typing/content';
-import { Operation } from '@typing/operations';
+import { AbilityBlock, Archetype, Class, ClassArchetype, Rarity } from '@schemas/content';
+import { Operation } from '@schemas/operations';
 import { isValidImage } from '@utils/images';
 import { hasTraitType } from '@utils/traits';
 import useRefresh from '@utils/use-refresh';
@@ -64,7 +64,7 @@ export function CreateClassArchetypeModal(props: {
     queryKey: [`get-class-archetype-${props.editId}`, { editId: props.editId }],
     queryFn: async ({ queryKey }) => {
       // @ts-ignore
-      // eslint-disable-next-line
+       
       const [_key, { editId }] = queryKey;
 
       const archetype = await fetchContentById<ClassArchetype>('class-archetype', editId);
@@ -98,13 +98,14 @@ export function CreateClassArchetypeModal(props: {
       rarity: 'COMMON' as Rarity,
       description: '',
       class_id: -1,
-      archetype_id: undefined as number | undefined,
-      operations: [] as Operation[] | undefined,
-      feature_adjustments: [] as ClassArchetype['feature_adjustments'] | undefined,
+      archetype_id: null as number | null,
+      operations: [] as Operation[] | null,
+      feature_adjustments: [] as ClassArchetype['feature_adjustments'] | null,
       override_class_operations: false,
-      override_skill_training_base: null as number | null | undefined,
+      override_skill_training_base: null as number | null,
       artwork_url: '',
       content_source_id: -1,
+      deprecated: false,
       version: '1.0',
     },
 
@@ -180,7 +181,7 @@ export function CreateClassArchetypeModal(props: {
                         }
                       });
                       if (fa.data) {
-                        fa.data.traits = faDataTraits;
+                        fa.data.traits = faDataTraits ?? null;
                       }
 
                       return {
@@ -209,7 +210,7 @@ export function CreateClassArchetypeModal(props: {
                   showButton: false,
                   overrideLabel: 'Select an Archetype',
                 }}
-                selectedId={form.values.archetype_id}
+                selectedId={form.values.archetype_id ?? undefined}
               />
             </Group>
 
@@ -243,7 +244,7 @@ export function CreateClassArchetypeModal(props: {
               labelPosition='left'
               onClick={toggleAdditional}
             />
-            <Collapse in={openedAdditional}>
+            <Collapse expanded={openedAdditional}>
               <Stack gap={10}>
                 <TextInput
                   defaultValue={form.values.artwork_url ?? ''}
@@ -311,7 +312,7 @@ export function CreateClassArchetypeModal(props: {
                 }
               }}
             />
-            <Collapse in={openedAdjustments}>
+            <Collapse expanded={openedAdjustments}>
               <Stack gap={10}>
                 <Group justify='flex-end'>
                   <Select
@@ -428,7 +429,7 @@ export function CreateClassArchetypeModal(props: {
               my='xs'
               label={
                 <Group gap={3} wrap='nowrap'>
-                  <Button variant={openedOperations ? 'light' : 'subtle'} size='compact-sm' color='gray.6'>
+                  <Button variant={openedOperations ? 'filled' : 'subtle'} size='compact-sm' color='gray'>
                     Operations
                   </Button>
                   {form.values.operations && form.values.operations.length > 0 && (
@@ -441,7 +442,7 @@ export function CreateClassArchetypeModal(props: {
               labelPosition='left'
               onClick={toggleOperations}
             />
-            <Collapse in={openedOperations}>
+            <Collapse expanded={openedOperations}>
               <Stack gap={10}>
                 <OperationSection
                   title={
@@ -470,7 +471,7 @@ export function CreateClassArchetypeModal(props: {
                       </HoverCard.Dropdown>
                     </HoverCard>
                   }
-                  operations={form.values.operations}
+                  operations={form.values.operations ?? undefined}
                   onChange={(operations) => form.setValues({ ...form.values, operations })}
                 />
                 <Divider />

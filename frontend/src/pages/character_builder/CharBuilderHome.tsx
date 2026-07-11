@@ -1,7 +1,6 @@
 import { generateNames } from '@ai/fantasygen-dev/name-controller';
-import { characterState } from '@atoms/characterAtoms';
 import { GroupLinkSwitch, LinkSwitch, LinksGroup } from '@common/LinksGroup';
-import { GUIDE_BLUE } from '@constants/data';
+import { GUIDE_BLUE, IMPRINT_BG_COLOR, IMPRINT_BG_COLOR_HOVER, IMPRINT_BORDER_COLOR } from '@constants/data';
 import {
   Stack,
   Group,
@@ -49,12 +48,13 @@ import {
   IconFlag,
   IconX,
   IconExternalLink,
+  IconArrowRight,
 } from '@tabler/icons-react';
 import { getAllBackgroundImages } from '@utils/background-images';
 import { getAllPortraitImages } from '@utils/portrait-images';
 import useRefresh from '@utils/use-refresh';
 import { useState } from 'react';
-import { useRecoilState } from 'recoil';
+import { useAtom } from 'jotai';
 import FantasyGen_dev from '@assets/images/fantasygen_dev.png';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -70,11 +70,11 @@ import OperationsModal from '@modals/OperationsModal';
 import { hasPatreonAccess } from '@utils/patreon';
 import { phoneQuery } from '@utils/mobile-responsive';
 import { drawerState } from '@atoms/navAtoms';
-import { Campaign, PublicUser } from '@typing/content';
+import { Campaign, PublicUser } from '@schemas/content';
 import { userState } from '@atoms/userAtoms';
 import { makeRequest } from '@requests/request-manager';
 import { updateSubscriptions } from '@content/homebrew';
-import { ImageOption } from '@typing/index';
+import { ImageOption } from '@schemas/index';
 import { cloneDeep, isEqual, uniq } from 'lodash-es';
 import BlurBox from '@common/BlurBox';
 import { DisplayIcon } from '@common/IconDisplay';
@@ -88,7 +88,7 @@ export default function CharBuilderHome(props: { characterId: number; pageHeight
   const isPhone = useMediaQuery(phoneQuery());
 
   const queryClient = useQueryClient();
-  const [_drawer, openDrawer] = useRecoilState(drawerState);
+  const [_drawer, openDrawer] = useAtom(drawerState);
 
   const { character, setCharacter } = useCharacter(props.characterId, {
     type: 'SIMPLE',
@@ -99,7 +99,7 @@ export default function CharBuilderHome(props: { characterId: number; pageHeight
 
   const [openedOperations, setOpenedOperations] = useState(false);
 
-  const [user, setUser] = useRecoilState(userState);
+  const [user, setUser] = useAtom(userState);
   useQuery({
     queryKey: [`find-account-self`],
     queryFn: async () => {
@@ -482,7 +482,7 @@ export default function CharBuilderHome(props: { characterId: number; pageHeight
                   />
                 ))}
                 {(!user?.subscribed_content_sources || user?.subscribed_content_sources?.length === 0) && (
-                  <Text c='gray.5' fz='sm' ta='center' fs='italic' py={20}>
+                  <Text c='gray.2' fz='sm' ta='center' fs='italic' py={20}>
                     No subscribed bundles found.{' '}
                     <Anchor fz='sm' href='/homebrew'>
                       Go add some!
@@ -877,7 +877,7 @@ export default function CharBuilderHome(props: { characterId: number; pageHeight
               }
             />
           ) : (
-            <PasswordInput
+            <TextInput
               radius='xl'
               size='xs'
               label={<Text fz='sm'>Campaign</Text>}
@@ -891,21 +891,29 @@ export default function CharBuilderHome(props: { characterId: number; pageHeight
                 ['Enter', joinCampaign],
               ])}
               rightSectionWidth={28}
-              leftSection={<IconKey style={{ width: rem(12), height: rem(12) }} stroke={1.5} />}
+              leftSection={<IconKey style={{ width: rem(14), height: rem(14) }} stroke={1.5} />}
               rightSection={
                 <ActionIcon
                   size={22}
                   radius='xl'
-                  disabled={!campaignKey}
                   color={theme.primaryColor}
                   variant='filled'
+                  style={{
+                    visibility: campaignKey ? 'visible' : 'hidden',
+                  }}
                   onClick={async () => {
                     await joinCampaign();
                   }}
                 >
-                  <IconPlus style={{ width: rem(18), height: rem(18) }} stroke={1.5} />
+                  <IconArrowRight style={{ width: rem(18), height: rem(18) }} stroke={1.5} />
                 </ActionIcon>
               }
+              styles={{
+                input: {
+                  backgroundColor: IMPRINT_BG_COLOR,
+                  borderColor: IMPRINT_BORDER_COLOR,
+                },
+              }}
             />
           )}
           <ColorInput
@@ -950,6 +958,12 @@ export default function CharBuilderHome(props: { characterId: number; pageHeight
                 };
               });
             }}
+            styles={{
+              input: {
+                backgroundColor: IMPRINT_BG_COLOR,
+                borderColor: IMPRINT_BORDER_COLOR,
+              },
+            }}
           />
           <Box>
             <Text fz='sm'>Background Artwork</Text>
@@ -962,10 +976,6 @@ export default function CharBuilderHome(props: { characterId: number; pageHeight
                   innerProps: {
                     options: getAllBackgroundImages(),
                     onSelect: (option: ImageOption) => {
-                      if (!hasPatreonAccess(getCachedPublicUser(), 1)) {
-                        displayPatronOnly();
-                        return;
-                      }
                       setCharacter((prev) => {
                         if (!prev) return prev;
                         return {
@@ -998,7 +1008,7 @@ export default function CharBuilderHome(props: { characterId: number; pageHeight
               <ScrollArea h={150} scrollbars='y'>
                 <Stack gap={5}>
                   {apiClients?.map((client, index) => (
-                    <BlurBox key={index} p='sm' bgColor={theme.colors.dark[6]}>
+                    <BlurBox key={index} p='sm'>
                       <Stack gap={5}>
                         <Group>
                           <DisplayIcon width={25} strValue={client?.image_url} />
@@ -1006,7 +1016,7 @@ export default function CharBuilderHome(props: { characterId: number; pageHeight
                         </Group>
                         {client?.description && <Text fz='xs'>{client?.description}</Text>}
                         <Anchor
-                          underline='always'
+                          underline='hover'
                           onClick={() => {
                             modals.openConfirmModal({
                               id: 'remove-client-access',
@@ -1042,11 +1052,11 @@ export default function CharBuilderHome(props: { characterId: number; pageHeight
                               },
                             });
                           }}
-                          c='gray.7'
+                          c='gray.5'
                           ta='center'
                           size='xs'
                         >
-                          Revoke Access
+                          [ Revoke Access ]
                         </Anchor>
                       </Stack>
                     </BlurBox>
@@ -1066,7 +1076,6 @@ export default function CharBuilderHome(props: { characterId: number; pageHeight
     queryKey: [`find-campaign-${character?.campaign_id}`, { campaign_id: character?.campaign_id }],
     queryFn: async ({ queryKey }) => {
       // @ts-ignore
-      // eslint-disable-next-line
       const [_key, { campaign_id }] = queryKey;
 
       const campaigns = await makeRequest<Campaign[]>('find-campaign', {
@@ -1297,14 +1306,14 @@ export default function CharBuilderHome(props: { characterId: number; pageHeight
                 <Avatar
                   src={character?.details?.image_url}
                   alt='Character Portrait'
-                  size='40'
+                  size='38'
                   radius='xl'
                   variant='transparent'
-                  color='dark.3'
+                  color={IMPRINT_BORDER_COLOR}
                   style={{
-                    border: `1px solid ${theme.colors.dark[4]}`,
+                    border: `1px solid ${IMPRINT_BORDER_COLOR}`,
                   }}
-                  bg={theme.colors.dark[6]}
+                  bg={IMPRINT_BG_COLOR}
                 >
                   <IconUserCircle size='1.5rem' stroke={1.5} />
                 </Avatar>
@@ -1331,7 +1340,7 @@ export default function CharBuilderHome(props: { characterId: number; pageHeight
                           size={22}
                           loading={loadingGenerateName}
                           radius='xl'
-                          color='dark'
+                          color='gray'
                           variant='subtle'
                           onClick={async () => {
                             if (!character) return;
@@ -1420,6 +1429,12 @@ export default function CharBuilderHome(props: { characterId: number; pageHeight
                       </HoverCard.Dropdown>
                     </HoverCard>
                   }
+                  styles={{
+                    input: {
+                      backgroundColor: IMPRINT_BG_COLOR,
+                      borderColor: IMPRINT_BORDER_COLOR,
+                    },
+                  }}
                 />
               )}
               <Select
@@ -1446,6 +1461,12 @@ export default function CharBuilderHome(props: { characterId: number; pageHeight
                       };
                     });
                   }
+                }}
+                styles={{
+                  input: {
+                    backgroundColor: IMPRINT_BG_COLOR,
+                    borderColor: IMPRINT_BORDER_COLOR,
+                  },
                 }}
               />
             </Group>

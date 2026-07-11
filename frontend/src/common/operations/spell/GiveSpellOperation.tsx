@@ -1,10 +1,10 @@
 import { SelectContentButton } from '@common/select/SelectContent';
-import { Spell } from '@typing/content';
+import { Spell } from '@schemas/content';
 import { OperationWrapper } from '../Operations';
 import { Group, NumberInput, SegmentedControl, Stack, TextInput, Text } from '@mantine/core';
 import { useState } from 'react';
 import { useDidUpdate } from '@mantine/hooks';
-import { GiveSpellData } from '@typing/operations';
+import { GiveSpellData } from '@schemas/operations';
 import { labelToVariable } from '@variables/variable-utils';
 
 export function GiveSpellOperation(props: {
@@ -75,7 +75,7 @@ export function GiveSpellOperation(props: {
               min={0}
               max={10}
               w={70}
-              value={rank}
+              value={rank ?? undefined}
               onChange={(val) => setRank(parseInt(`${val}`))}
               allowDecimal={false}
             />
@@ -114,7 +114,7 @@ export function GiveSpellOperation(props: {
               min={0}
               max={10}
               w={70}
-              value={rank}
+              value={rank ?? undefined}
               onChange={(val) => setRank(parseInt(`${val}`))}
               allowDecimal={false}
             />
@@ -125,7 +125,7 @@ export function GiveSpellOperation(props: {
               min={0}
               max={10}
               w={90}
-              value={casts}
+              value={casts ?? undefined}
               onChange={(val) => setCasts(parseInt(`${val}`))}
               allowDecimal={false}
             />

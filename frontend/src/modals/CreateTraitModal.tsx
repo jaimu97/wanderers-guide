@@ -19,7 +19,7 @@ import { useForm } from '@mantine/form';
 import { useDisclosure } from '@mantine/hooks';
 import { useQuery } from '@tanstack/react-query';
 import { JSONContent } from '@tiptap/react';
-import { Trait } from '@typing/content';
+import { Trait } from '@schemas/content';
 import useRefresh from '@utils/use-refresh';
 import { useState } from 'react';
 
@@ -56,7 +56,7 @@ export function CreateTraitModal(props: {
     queryKey: [`get-trait-${props.editId}`, { editId: props.editId, editTrait: props.editTrait }],
     queryFn: async ({ queryKey }) => {
       // @ts-ignore
-      // eslint-disable-next-line
+       
       const [_key, { editId, editTrait }] = queryKey as [string, { editId?: number; editTrait?: Trait }];
 
       const trait = editId ? await fetchContentById<Trait>('trait', editId) : editTrait;
@@ -190,7 +190,7 @@ export function CreateTraitModal(props: {
               labelPosition='left'
               onClick={toggleAdditional}
             />
-            <Collapse in={openedAdditional}>
+            <Collapse expanded={openedAdditional}>
               <Stack gap={10}>
                 <Switch
                   label='Important'

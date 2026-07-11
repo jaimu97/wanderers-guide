@@ -12,6 +12,7 @@ import {
   Stack,
   Text,
   TextInput,
+  useMantineColorScheme,
   useMantineTheme,
 } from '@mantine/core';
 import ManageSpellsModal from '@modals/ManageSpellsModal';
@@ -28,10 +29,10 @@ import {
   SpellSectionType,
   SpellSlot,
   Trait,
-} from '@typing/content';
+} from '@schemas/content';
 import useRefresh from '@utils/use-refresh';
 import { useEffect, useMemo, useState } from 'react';
-import { SetterOrUpdater } from 'recoil';
+import { SetterOrUpdater } from '@utils/type-fixing';
 import FocusSpellsList from './spells_list/FocusSpellsList';
 import InnateSpellsList from './spells_list/InnateSpellsList';
 import PreparedSpellsList from './spells_list/PreparedSpellsList';
@@ -41,11 +42,12 @@ import StaffSpellsList from './spells_list/StaffSpellsList';
 import WandSpellsList from './spells_list/WandSpellsList';
 import SpellheartSpellsList from './spells_list/SpellheartSpellsList';
 import { filterByTraitType } from '@items/inv-utils';
-import { StoreID } from '@typing/variables';
+import { StoreID } from '@schemas/variables';
 import { isTruthy } from '@utils/type-fixing';
 import { groupBy } from 'lodash-es';
 import { phoneQuery } from '@utils/mobile-responsive';
 import { useDebouncedValue, useMediaQuery } from '@mantine/hooks';
+import { IMPRINT_BG_COLOR, IMPRINT_BORDER_COLOR } from '@constants/data';
 
 export default function SpellsPanel(props: {
   id: StoreID;
@@ -57,6 +59,7 @@ export default function SpellsPanel(props: {
 }) {
   const isPhone = useMediaQuery(phoneQuery());
   const theme = useMantineTheme();
+  const { colorScheme } = useMantineColorScheme();
   const [searchQuery, setSearchQuery] = useState('');
   const [searchQueryDebounced] = useDebouncedValue(searchQuery, 200);
   const [manageSpells, setManageSpells] = useState<
@@ -154,8 +157,8 @@ export default function SpellsPanel(props: {
             }
             styles={{
               input: {
-                backgroundColor: 'rgba(0, 0, 0, 0.3)',
-                borderColor: searchQuery.trim().length > 0 ? theme.colors['guide'][8] : undefined,
+                backgroundColor: IMPRINT_BG_COLOR,
+                borderColor: searchQuery.trim().length > 0 ? theme.colors['guide'][8] : 'transparent',
               },
             }}
           />
@@ -381,14 +384,14 @@ function ActionFilter(props: {
         size='lg'
         aria-label='Filter One Action'
         style={{
-          backgroundColor: actionTypeFilter === 'ALL' ? theme.colors.dark[6] : undefined,
-          borderColor: actionTypeFilter === 'ALL' ? theme.colors.dark[4] : undefined,
+          backgroundColor: actionTypeFilter === 'ALL' ? IMPRINT_BG_COLOR : undefined,
+          borderColor: actionTypeFilter === 'ALL' ? IMPRINT_BORDER_COLOR : undefined,
         }}
         onClick={() => {
           setActionTypeFilter('ALL');
         }}
       >
-        <Text c='gray.3'>All</Text>
+        <Text c='gray.2'>All</Text>
       </ActionIcon>
       <ActionIcon
         variant='subtle'
@@ -397,7 +400,7 @@ function ActionFilter(props: {
         size='lg'
         aria-label='Filter One Action'
         style={{
-          backgroundColor: actionTypeFilter === 'ONE-ACTION' ? theme.colors.dark[6] : undefined,
+          backgroundColor: actionTypeFilter === 'ONE-ACTION' ? IMPRINT_BG_COLOR : undefined,
           borderColor: actionTypeFilter === 'ONE-ACTION' ? theme.colors['guide'][8] : undefined,
         }}
         onClick={() => {
@@ -413,7 +416,7 @@ function ActionFilter(props: {
         size='lg'
         aria-label='Filter Two Actions'
         style={{
-          backgroundColor: actionTypeFilter === 'TWO-ACTIONS' ? theme.colors.dark[6] : undefined,
+          backgroundColor: actionTypeFilter === 'TWO-ACTIONS' ? IMPRINT_BG_COLOR : undefined,
           borderColor: actionTypeFilter === 'TWO-ACTIONS' ? theme.colors['guide'][8] : undefined,
         }}
         onClick={() => {
@@ -429,7 +432,7 @@ function ActionFilter(props: {
         size='lg'
         aria-label='Filter Three Actions'
         style={{
-          backgroundColor: actionTypeFilter === 'THREE-ACTIONS' ? theme.colors.dark[6] : undefined,
+          backgroundColor: actionTypeFilter === 'THREE-ACTIONS' ? IMPRINT_BG_COLOR : undefined,
           borderColor: actionTypeFilter === 'THREE-ACTIONS' ? theme.colors['guide'][8] : undefined,
         }}
         onClick={() => {
@@ -445,7 +448,7 @@ function ActionFilter(props: {
         size='lg'
         aria-label='Filter Free Action'
         style={{
-          backgroundColor: actionTypeFilter === 'FREE-ACTION' ? theme.colors.dark[6] : undefined,
+          backgroundColor: actionTypeFilter === 'FREE-ACTION' ? IMPRINT_BG_COLOR : undefined,
           borderColor: actionTypeFilter === 'FREE-ACTION' ? theme.colors['guide'][8] : undefined,
         }}
         onClick={() => {
@@ -461,7 +464,7 @@ function ActionFilter(props: {
         size='lg'
         aria-label='Filter Reaction'
         style={{
-          backgroundColor: actionTypeFilter === 'REACTION' ? theme.colors.dark[6] : undefined,
+          backgroundColor: actionTypeFilter === 'REACTION' ? IMPRINT_BG_COLOR : undefined,
           borderColor: actionTypeFilter === 'REACTION' ? theme.colors['guide'][8] : undefined,
         }}
         onClick={() => {
@@ -527,7 +530,7 @@ function SpellList(props: {
             slot.spell_id === spell.id &&
             slot.rank === spell.rank &&
             slot.source === props.source!.name &&
-            !!slot.exhausted == !cast
+            !!slot.exhausted === !cast
         );
         if (slotIndex === -1) return c; // Shouldn't happen
         const newSlots = [...slots];

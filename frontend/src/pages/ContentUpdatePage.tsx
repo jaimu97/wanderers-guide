@@ -22,13 +22,13 @@ import {
 } from '@mantine/core';
 import { IconArrowBigRightLine, IconThumbUp, IconThumbDown } from '@tabler/icons-react';
 import { useQuery } from '@tanstack/react-query';
-import { Creature } from '@typing/content';
+import { Creature } from '@schemas/content';
 import { setPageTitle } from '@utils/document-change';
 import { sign } from '@utils/numbers';
 import { toLabel } from '@utils/strings';
 import { useMemo } from 'react';
 import { useLoaderData } from 'react-router-dom';
-import { useRecoilState } from 'recoil';
+import { useAtom } from 'jotai';
 
 export function Component() {
   const { updateId } = useLoaderData() as {
@@ -36,8 +36,8 @@ export function Component() {
   };
   setPageTitle(`Content Update #${updateId}`);
 
-  const [_drawer, openDrawer] = useRecoilState(drawerState);
-  const [_creatureDrawer, openCreatureDrawer] = useRecoilState(creatureDrawerState);
+  const [_drawer, openDrawer] = useAtom(drawerState);
+  const [_creatureDrawer, openCreatureDrawer] = useAtom(creatureDrawerState);
 
   const { data } = useQuery({
     queryKey: [`find-content-update-${updateId}`],

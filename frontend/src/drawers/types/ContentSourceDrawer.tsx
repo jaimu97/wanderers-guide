@@ -28,10 +28,10 @@ import UnlockHomebrewModal from '@modals/UnlockHomebrewModal';
 import { makeRequest } from '@requests/request-manager';
 import { IconExternalLink } from '@tabler/icons-react';
 import { useQuery } from '@tanstack/react-query';
-import { AbilityBlockType, ContentSource, ContentType } from '@typing/content';
+import { AbilityBlockType, ContentSource, ContentType } from '@schemas/content';
 import { useEffect, useRef, useState } from 'react';
-import { useRecoilState } from 'recoil';
-import { DrawerType } from '@typing/index';
+import { useAtom } from 'jotai';
+import { DrawerType } from '@schemas/index';
 import { COMMON_CORE_ID, PATHFINDER_CORE_ID, STARFINDER_CORE_ID } from '@constants/data';
 
 export function ContentSourceDrawerTitle(props: { data: { id?: number; source?: ContentSource } }) {
@@ -41,7 +41,7 @@ export function ContentSourceDrawerTitle(props: { data: { id?: number; source?: 
     queryKey: [`find-content-source-${id}`, { id }],
     queryFn: async ({ queryKey }) => {
       // @ts-ignore
-      // eslint-disable-next-line
+       
       const [_key, { id }] = queryKey;
       const sources = await fetchContentSources([id]);
       return sources?.find((s) => s.id === id) ?? null;
@@ -51,7 +51,7 @@ export function ContentSourceDrawerTitle(props: { data: { id?: number; source?: 
   const source = props.data.source ?? _source;
 
   // Get if user is subscribed to this source
-  const [user, setUser] = useRecoilState(userState);
+  const [user, setUser] = useAtom(userState);
   const { refetch } = useQuery({
     queryKey: [`find-account-self`],
     queryFn: async () => {
@@ -140,15 +140,15 @@ export function ContentSourceDrawerContent(props: {
   const missingSelectRef = useRef<HTMLInputElement>(null);
   const [searchValue, setSearchValue] = useState('');
 
-  const [_drawer, openDrawer] = useRecoilState(drawerState);
-  const [_creatureDrawer, openCreatureDrawer] = useRecoilState(creatureDrawerState);
-  const [_feedbackData, setFeedbackData] = useRecoilState(feedbackState);
+  const [_drawer, openDrawer] = useAtom(drawerState);
+  const [_creatureDrawer, openCreatureDrawer] = useAtom(creatureDrawerState);
+  const [_feedbackData, setFeedbackData] = useAtom(feedbackState);
 
   const { data: content } = useQuery({
     queryKey: [`find-content-source-package-${id}`, { id, source: props.data.source }],
     queryFn: async ({ queryKey }) => {
       // @ts-ignore
-      // eslint-disable-next-line
+       
       const [_key, { id, source }] = queryKey;
       const _id = id ?? source?.id;
       return await fetchContentPackage([_id], { fetchSources: true, fetchCreatures: true });
@@ -263,8 +263,8 @@ export function ContentSourceDrawerContent(props: {
                   <Text c='white' fz='sm'>
                     Actions
                   </Text>
-                  <Badge mr='sm' variant='outline' color='gray.5' size='xs'>
-                    <Text fz='sm' c='gray.5' span>
+                  <Badge mr='sm' variant='outline' color='gray.5' size='sm'>
+                    <Text c='gray.2' span inherit>
                       {actions.length}
                     </Text>
                   </Badge>
@@ -296,8 +296,8 @@ export function ContentSourceDrawerContent(props: {
                   <Text c='white' fz='sm'>
                     Ancestries
                   </Text>
-                  <Badge mr='sm' variant='outline' color='gray.5' size='xs'>
-                    <Text fz='sm' c='gray.5' span>
+                  <Badge mr='sm' variant='outline' color='gray.5' size='sm'>
+                    <Text c='gray.2' span inherit>
                       {content.ancestries.length}
                     </Text>
                   </Badge>
@@ -329,8 +329,8 @@ export function ContentSourceDrawerContent(props: {
                   <Text c='white' fz='sm'>
                     Backgrounds
                   </Text>
-                  <Badge mr='sm' variant='outline' color='gray.5' size='xs'>
-                    <Text fz='sm' c='gray.5' span>
+                  <Badge mr='sm' variant='outline' color='gray.5' size='sm'>
+                    <Text c='gray.2' span inherit>
                       {content.backgrounds.length}
                     </Text>
                   </Badge>
@@ -362,8 +362,8 @@ export function ContentSourceDrawerContent(props: {
                   <Text c='white' fz='sm'>
                     Classes
                   </Text>
-                  <Badge mr='sm' variant='outline' color='gray.5' size='xs'>
-                    <Text fz='sm' c='gray.5' span>
+                  <Badge mr='sm' variant='outline' color='gray.5' size='sm'>
+                    <Text c='gray.2' span inherit>
                       {content.classes.length}
                     </Text>
                   </Badge>
@@ -395,8 +395,8 @@ export function ContentSourceDrawerContent(props: {
                   <Text c='white' fz='sm'>
                     Class Archetypes
                   </Text>
-                  <Badge mr='sm' variant='outline' color='gray.5' size='xs'>
-                    <Text fz='sm' c='gray.5' span>
+                  <Badge mr='sm' variant='outline' color='gray.5' size='sm'>
+                    <Text c='gray.2' span inherit>
                       {content.classArchetypes.length}
                     </Text>
                   </Badge>
@@ -428,8 +428,8 @@ export function ContentSourceDrawerContent(props: {
                   <Text c='white' fz='sm'>
                     Archetypes
                   </Text>
-                  <Badge mr='sm' variant='outline' color='gray.5' size='xs'>
-                    <Text fz='sm' c='gray.5' span>
+                  <Badge mr='sm' variant='outline' color='gray.5' size='sm'>
+                    <Text c='gray.2' span inherit>
                       {content.archetypes.length}
                     </Text>
                   </Badge>
@@ -461,8 +461,8 @@ export function ContentSourceDrawerContent(props: {
                   <Text c='white' fz='sm'>
                     Versatile Heritages
                   </Text>
-                  <Badge mr='sm' variant='outline' color='gray.5' size='xs'>
-                    <Text fz='sm' c='gray.5' span>
+                  <Badge mr='sm' variant='outline' color='gray.5' size='sm'>
+                    <Text c='gray.2' span inherit>
                       {content.versatileHeritages.length}
                     </Text>
                   </Badge>
@@ -494,8 +494,8 @@ export function ContentSourceDrawerContent(props: {
                   <Text c='white' fz='sm'>
                     Creatures
                   </Text>
-                  <Badge mr='sm' variant='outline' color='gray.5' size='xs'>
-                    <Text fz='sm' c='gray.5' span>
+                  <Badge mr='sm' variant='outline' color='gray.5' size='sm'>
+                    <Text c='gray.2' span inherit>
                       {content.creatures.length}
                     </Text>
                   </Badge>
@@ -528,8 +528,8 @@ export function ContentSourceDrawerContent(props: {
                   <Text c='white' fz='sm'>
                     Feats
                   </Text>
-                  <Badge mr='sm' variant='outline' color='gray.5' size='xs'>
-                    <Text fz='sm' c='gray.5' span>
+                  <Badge mr='sm' variant='outline' color='gray.5' size='sm'>
+                    <Text c='gray.2' span inherit>
                       {feats.length}
                     </Text>
                   </Badge>
@@ -561,8 +561,8 @@ export function ContentSourceDrawerContent(props: {
                   <Text c='white' fz='sm'>
                     Items
                   </Text>
-                  <Badge mr='sm' variant='outline' color='gray.5' size='xs'>
-                    <Text fz='sm' c='gray.5' span>
+                  <Badge mr='sm' variant='outline' color='gray.5' size='sm'>
+                    <Text c='gray.2' span inherit>
                       {content.items.length}
                     </Text>
                   </Badge>
@@ -594,8 +594,8 @@ export function ContentSourceDrawerContent(props: {
                   <Text c='white' fz='sm'>
                     Languages
                   </Text>
-                  <Badge mr='sm' variant='outline' color='gray.5' size='xs'>
-                    <Text fz='sm' c='gray.5' span>
+                  <Badge mr='sm' variant='outline' color='gray.5' size='sm'>
+                    <Text c='gray.2' span inherit>
                       {content.languages.length}
                     </Text>
                   </Badge>
@@ -627,8 +627,8 @@ export function ContentSourceDrawerContent(props: {
                   <Text c='white' fz='sm'>
                     Modes
                   </Text>
-                  <Badge mr='sm' variant='outline' color='gray.5' size='xs'>
-                    <Text fz='sm' c='gray.5' span>
+                  <Badge mr='sm' variant='outline' color='gray.5' size='sm'>
+                    <Text c='gray.2' span inherit>
                       {modes.length}
                     </Text>
                   </Badge>
@@ -660,8 +660,8 @@ export function ContentSourceDrawerContent(props: {
                   <Text c='white' fz='sm'>
                     Physical Features
                   </Text>
-                  <Badge mr='sm' variant='outline' color='gray.5' size='xs'>
-                    <Text fz='sm' c='gray.5' span>
+                  <Badge mr='sm' variant='outline' color='gray.5' size='sm'>
+                    <Text c='gray.2' span inherit>
                       {physicalFeatures.length}
                     </Text>
                   </Badge>
@@ -693,8 +693,8 @@ export function ContentSourceDrawerContent(props: {
                   <Text c='white' fz='sm'>
                     Senses
                   </Text>
-                  <Badge mr='sm' variant='outline' color='gray.5' size='xs'>
-                    <Text fz='sm' c='gray.5' span>
+                  <Badge mr='sm' variant='outline' color='gray.5' size='sm'>
+                    <Text c='gray.2' span inherit>
                       {senses.length}
                     </Text>
                   </Badge>
@@ -726,8 +726,8 @@ export function ContentSourceDrawerContent(props: {
                   <Text c='white' fz='sm'>
                     Spells
                   </Text>
-                  <Badge mr='sm' variant='outline' color='gray.5' size='xs'>
-                    <Text fz='sm' c='gray.5' span>
+                  <Badge mr='sm' variant='outline' color='gray.5' size='sm'>
+                    <Text c='gray.2' span inherit>
                       {content.spells.length}
                     </Text>
                   </Badge>
@@ -759,8 +759,8 @@ export function ContentSourceDrawerContent(props: {
                   <Text c='white' fz='sm'>
                     Traits
                   </Text>
-                  <Badge mr='sm' variant='outline' color='gray.5' size='xs'>
-                    <Text fz='sm' c='gray.5' span>
+                  <Badge mr='sm' variant='outline' color='gray.5' size='sm'>
+                    <Text c='gray.2' span inherit>
                       {content.traits.length}
                     </Text>
                   </Badge>
@@ -792,8 +792,8 @@ export function ContentSourceDrawerContent(props: {
                   <Text c='white' fz='sm' fw={600}>
                     Uncategorized
                   </Text>
-                  <Badge mr='sm' variant='outline' color='gray.5' size='xs'>
-                    <Text fz='sm' c='gray.5' span>
+                  <Badge mr='sm' variant='outline' color='gray.5' size='sm'>
+                    <Text c='gray.2' span inherit>
                       {uncategorizedAbilities.length}
                     </Text>
                   </Badge>
@@ -821,7 +821,9 @@ export function ContentSourceDrawerContent(props: {
         </Accordion>
       </Box>
 
-      {props.data.showOperations && <ShowOperationsButton name={source.name} operations={source.operations} />}
+      {props.data.showOperations && (
+        <ShowOperationsButton name={source.name} operations={source.operations ?? undefined} />
+      )}
 
       {!source.user_id && (
         <Box>

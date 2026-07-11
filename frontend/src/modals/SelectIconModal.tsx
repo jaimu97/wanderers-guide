@@ -1,4 +1,5 @@
 import { Icon, getAllIcons } from '@common/Icon';
+import { IMPRINT_BG_COLOR, IMPRINT_BORDER_COLOR } from '@constants/data';
 import classes from '@css/ActionsGrid.module.css';
 import {
   ActionIcon,
@@ -12,6 +13,7 @@ import {
   TextInput,
   UnstyledButton,
   useMantineTheme,
+  useMantineColorScheme,
 } from '@mantine/core';
 import { useInViewport } from '@mantine/hooks';
 import { ContextModalProps } from '@mantine/modals';
@@ -46,6 +48,7 @@ export function SelectIconModalContents(props: {
 }) {
   const [searchQuery, setSearchQuery] = useState('');
   const theme = useMantineTheme();
+  const { colorScheme } = useMantineColorScheme();
 
   // Infinite scroll
   const { ref, inViewport } = useInViewport();
@@ -90,7 +93,7 @@ export function SelectIconModalContents(props: {
         onChange={(event) => setSearchQuery(event.target.value)}
         styles={{
           input: {
-            backgroundColor: 'rgba(0, 0, 0, 0.3)',
+            backgroundColor: IMPRINT_BG_COLOR,
             borderColor: isSearching ? theme.colors['guide'][8] : undefined,
           },
         }}
@@ -102,8 +105,8 @@ export function SelectIconModalContents(props: {
         py={15}
         pr={5}
         style={{
-          backgroundColor: 'rgba(0, 0, 0, 0.3)',
-          borderColor: theme.colors['dark'][8],
+          backgroundColor: IMPRINT_BG_COLOR,
+          borderColor: IMPRINT_BORDER_COLOR,
         }}
       >
         <ScrollArea h={315} scrollbars='y'>

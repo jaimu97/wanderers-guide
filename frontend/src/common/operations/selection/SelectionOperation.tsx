@@ -28,7 +28,7 @@ import { useDidUpdate, useDisclosure } from '@mantine/hooks';
 import { createDefaultOperation } from '@operations/operation-utils';
 import { IconCircleMinus, IconCirclePlus } from '@tabler/icons-react';
 import { JSONContent } from '@tiptap/react';
-import { AbilityBlock, AbilityBlockType, Language, Rarity, Spell } from '@typing/content';
+import { AbilityBlock, AbilityBlockType, Language, Rarity, Spell } from '@schemas/content';
 import {
   Operation,
   OperationAdjValue,
@@ -48,8 +48,8 @@ import {
   OperationSelectOptionLanguage,
   OperationSelectOptionSpell,
   OperationSelectOptionType,
-} from '@typing/operations';
-import { ExtendedProficiencyValue, ExtendedVariableValue, VariableType, VariableValue } from '@typing/variables';
+} from '@schemas/operations';
+import { ExtendedProficiencyValue, ExtendedVariableValue, VariableType, VariableValue } from '@schemas/variables';
 import useRefresh from '@utils/use-refresh';
 import { getVariable } from '@variables/variable-manager';
 import { useEffect, useState } from 'react';
@@ -429,7 +429,7 @@ function SelectionFilteredSpell(props: {
               min={0}
               max={10}
               w={70}
-              value={rank}
+              value={rank ?? undefined}
               onChange={(val) => setRank(parseInt(`${val}`))}
               allowDecimal={false}
             />
@@ -468,7 +468,7 @@ function SelectionFilteredSpell(props: {
               min={0}
               max={10}
               w={70}
-              value={rank}
+              value={rank ?? undefined}
               onChange={(val) => setRank(parseInt(`${val}`))}
               allowDecimal={false}
             />
@@ -479,7 +479,7 @@ function SelectionFilteredSpell(props: {
               min={0}
               max={10}
               w={90}
-              value={casts}
+              value={casts ?? undefined}
               onChange={(val) => setCasts(parseInt(`${val}`))}
               allowDecimal={false}
             />
@@ -966,7 +966,7 @@ function SelectionPredefinedSpell(props: {
               min={0}
               max={10}
               w={70}
-              value={rank}
+              value={rank ?? undefined}
               onChange={(val) => setRank(parseInt(`${val}`))}
               allowDecimal={false}
             />
@@ -1005,7 +1005,7 @@ function SelectionPredefinedSpell(props: {
               min={0}
               max={10}
               w={70}
-              value={rank}
+              value={rank ?? undefined}
               onChange={(val) => setRank(parseInt(`${val}`))}
               allowDecimal={false}
             />
@@ -1016,7 +1016,7 @@ function SelectionPredefinedSpell(props: {
               min={0}
               max={10}
               w={90}
-              value={casts}
+              value={casts ?? undefined}
               onChange={(val) => setCasts(parseInt(`${val}`))}
               allowDecimal={false}
             />
@@ -1575,7 +1575,7 @@ export function SelectionPredefinedCustomOption(props: {
         my='xs'
         label={
           <Group gap={3} wrap='nowrap'>
-            <Button variant={openedOperations ? 'light' : 'subtle'} size='compact-sm' color='gray.6'>
+            <Button variant={openedOperations ? 'filled' : 'subtle'} size='compact-sm' color='gray'>
               Operations
             </Button>
             {props.option.operations && props.option.operations.length > 0 && (
@@ -1588,7 +1588,7 @@ export function SelectionPredefinedCustomOption(props: {
         labelPosition='left'
         onClick={toggleOperations}
       />
-      <Collapse in={openedOperations}>
+      <Collapse expanded={openedOperations}>
         <Stack gap={10}>
           <OperationSection
             title={

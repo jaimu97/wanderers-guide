@@ -1,3 +1,4 @@
+import { glassStyle } from '@utils/colors';
 import { ActionIcon, Group, Text, UnstyledButton, useMantineTheme } from '@mantine/core';
 import { useFocusWithin, useHover, useOs } from '@mantine/hooks';
 import { spotlight } from '@mantine/spotlight';
@@ -16,16 +17,14 @@ export function LoginButton(props: { onClick: () => void }) {
         height: 32,
         paddingLeft: theme.spacing.sm,
         paddingRight: theme.spacing.sm,
-        borderRadius: theme.radius.md,
         color: theme.colors.gray[4],
         fontWeight: 500,
-        backdropFilter: 'blur(8px)',
-        WebkitBackdropFilter: 'blur(8px)',
-        backgroundColor: hovered ? theme.colors.dark[8] + '20' : theme.colors.dark[8] + '00',
+        borderRadius: theme.radius.md,
+        ...glassStyle(),
       }}
     >
       <Group gap={2} wrap='nowrap'>
-        <Text fz='sm' c='gray.3' fw={500} style={{ textWrap: 'nowrap' }}>
+        <Text fz='sm' c='gray.2' fw={500} style={{ textWrap: 'nowrap' }}>
           Sign in{' '}
           <Text fz='sm' c='dimmed' span>
             |

@@ -23,24 +23,24 @@ import {
 } from '@mantine/core';
 import { IconArrowRight, IconCheck } from '@tabler/icons-react';
 import { useQuery } from '@tanstack/react-query';
-import { AbilityBlock, ClassArchetype } from '@typing/content';
+import { AbilityBlock, ClassArchetype } from '@schemas/content';
 import { toLabel } from '@utils/strings';
 import { groupBy } from 'lodash-es';
 import { useState } from 'react';
-import { useRecoilState } from 'recoil';
+import { useAtom } from 'jotai';
 
 export function ClassArchetypeDrawerTitle(props: {
   data: { id?: number; classArchetype?: ClassArchetype; onSelect?: () => void };
 }) {
   const id = props.data.id;
 
-  const [_drawer, openDrawer] = useRecoilState(drawerState);
+  const [_drawer, openDrawer] = useAtom(drawerState);
 
   const { data: _archetype } = useQuery({
     queryKey: [`find-class-archetype-${id}`, { id }],
     queryFn: async ({ queryKey }) => {
       // @ts-ignore
-      // eslint-disable-next-line
+       
       const [_key, { id }] = queryKey;
       return await fetchContentById<ClassArchetype>('class-archetype', id);
     },
@@ -88,7 +88,7 @@ export function ClassArchetypeDrawerContent(props: {
     queryKey: [`find-class-archetype-details-${id}`, { id }],
     queryFn: async ({ queryKey }) => {
       // @ts-ignore
-      // eslint-disable-next-line
+       
       const [_key, { id }] = queryKey;
       const archetype = await fetchContentById<ClassArchetype>('class-archetype', id);
       const abilityBlocks = await fetchContentAll<AbilityBlock>('ability-block', getDefaultSources('INFO'));
@@ -100,7 +100,7 @@ export function ClassArchetypeDrawerContent(props: {
   });
 
   const [descHidden, setDescHidden] = useState(true);
-  const [_drawer, openDrawer] = useRecoilState(drawerState);
+  const [_drawer, openDrawer] = useAtom(drawerState);
 
   const adjustments = groupBy(
     data?.archetype?.feature_adjustments?.map((fa) => {
@@ -128,11 +128,11 @@ export function ClassArchetypeDrawerContent(props: {
     <Accordion.Item key={level} value={level}>
       <Accordion.Control>
         <Group wrap='nowrap' justify='space-between' gap={0}>
-          <Text c='gray.5' fw={700} fz='md'>
+          <Text c='gray.2' fw={700} fz='md'>
             Level {level}
           </Text>
-          <Badge mr='sm' variant='outline' color='gray.5' size='xs'>
-            <Text fz='sm' c='gray.5' span>
+          <Badge mr='sm' variant='outline' color='gray.5' size='sm'>
+            <Text c='gray.2' span inherit>
               {adjustments[level].length}
             </Text>
           </Badge>
@@ -339,7 +339,7 @@ export function ClassArchetypeDrawerContent(props: {
         </Accordion>
 
         {adjSections.length === 0 && (
-          <Text c='gray.5' fz='sm' ta='center' fs='italic' py={10}>
+          <Text c='gray.2' fz='sm' ta='center' fs='italic' py={10}>
             No adjustments found.
           </Text>
         )}
@@ -360,7 +360,7 @@ export function ClassArchetypeDrawerContent(props: {
       </Stack>
 
       {props.data.showOperations && (
-        <ShowOperationsButton name={data.archetype.name} operations={data.archetype.operations} />
+        <ShowOperationsButton name={data.archetype.name} operations={data.archetype.operations ?? undefined} />
       )}
     </Stack>
   );

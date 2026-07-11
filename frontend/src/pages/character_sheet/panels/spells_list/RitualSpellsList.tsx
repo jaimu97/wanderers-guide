@@ -9,11 +9,12 @@ import {
   SpellListEntry,
   SpellSectionType,
   SpellSlot,
-} from '@typing/content';
+} from '@schemas/content';
 import { Dictionary } from 'node_modules/cypress/types/lodash';
 import SpellListEntrySection from './SpellListEntrySection';
-import { StoreID } from '@typing/variables';
-import { SetterOrUpdater } from 'recoil';
+import { StoreID } from '@schemas/variables';
+import { SetterOrUpdater } from '@utils/type-fixing';
+import ImprintButton from '@common/ImprintButton';
 
 export default function RitualSpellsList(props: {
   id: StoreID;
@@ -57,18 +58,19 @@ export default function RitualSpellsList(props: {
       <Accordion.Control h={40}>
         <Group wrap='nowrap' justify='space-between' gap={0}>
           <Group gap={10}>
-            <Text c='gray.5' fw={700} fz='sm'>
+            <Text c='gray.2' fw={700} fz='sm'>
               Rituals
             </Text>
             <Badge variant='outline' color='gray.5' size='xs'>
-              <Text fz='sm' c='gray.5' span>
+              <Text c='gray.2' span inherit>
                 {props.spellIds.length}
               </Text>
             </Badge>
           </Group>
 
           <Box mr={10}>
-            <BlurButton
+            <ImprintButton
+              radius='xl'
               size='xs'
               fw={500}
               onClick={(e) => {
@@ -79,7 +81,7 @@ export default function RitualSpellsList(props: {
               }}
             >
               Manage
-            </BlurButton>
+            </ImprintButton>
           </Box>
         </Group>
       </Accordion.Control>
@@ -119,7 +121,7 @@ export default function RitualSpellsList(props: {
               ))}
 
           {props.spellIds.length === 0 && (
-            <Text c='gray.6' fz='sm' fs='italic' ta='center' py={5}>
+            <Text c='gray.3' fz='sm' fs='italic' ta='center' py={5}>
               No rituals known
             </Text>
           )}

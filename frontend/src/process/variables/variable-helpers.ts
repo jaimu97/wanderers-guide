@@ -1,6 +1,6 @@
 import { getAcParts } from '@items/armor-handler';
 import { getBestArmor } from '@items/inv-utils';
-import { CastingSource, Item, LivingEntity } from '@typing/content';
+import { CastingSource, Item, LivingEntity } from '@schemas/content';
 import {
   ProficiencyType,
   StoreID,
@@ -9,7 +9,7 @@ import {
   VariableNum,
   VariableProf,
   VariableStr,
-} from '@typing/variables';
+} from '@schemas/variables';
 import { hasTraitType } from '@utils/traits';
 import { getVariable, getVariableBonuses } from './variable-manager';
 import { compileProficiencyType, compileExpressions, getProficiencyTypeValue } from './variable-utils';
@@ -165,8 +165,8 @@ export function getVariableBreakdown(id: StoreID, variableName: string) {
 }
 
 export function getBonusText(bonus: {
-  value?: number | undefined;
-  type?: string | undefined;
+  value?: number | null;
+  type?: string | null;
   text: string;
   source: string;
   timestamp: number;
@@ -223,7 +223,7 @@ export function getSpeedValue(id: StoreID, variable: VariableNum, entity: Living
   const finalData = getFinalVariableValue(id, variable.name);
 
   const armorItem = getBestArmor(id, entity?.inventory);
-  const hasHindering = hasTraitType('HINDERING', armorItem?.item.traits);
+  const hasHindering = hasTraitType('HINDERING', armorItem?.item.traits ?? undefined);
   const unburdenedIron = getVariable<VariableBool>(id, 'UNBURDENED_IRON')?.value ?? false;
 
   for (const [key, value] of finalData.bmap) {

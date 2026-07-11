@@ -9,13 +9,13 @@ import {
   SpellListEntry,
   SpellSectionType,
   SpellSlot,
-} from '@typing/content';
+} from '@schemas/content';
 import { rankNumber, sign } from '@utils/numbers';
 import { Dictionary } from 'node_modules/cypress/types/lodash';
-import { SetterOrUpdater } from 'recoil';
+import { SetterOrUpdater } from '@utils/type-fixing';
 import { SpellSlotSelect } from '../SpellsPanel';
 import SpellListEntrySection from './SpellListEntrySection';
-import { StoreID } from '@typing/variables';
+import { StoreID } from '@schemas/variables';
 
 export default function InnateSpellsList(props: {
   id: StoreID;
@@ -71,7 +71,7 @@ export default function InnateSpellsList(props: {
     <Accordion.Item value={props.index}>
       <Accordion.Control h={40}>
         <Group wrap='nowrap' justify='space-between' gap={0}>
-          <Text c='gray.5' fw={700} fz='sm'>
+          <Text c='gray.2' fw={700} fz='sm'>
             Innate Spells
           </Text>
         </Group>
@@ -114,11 +114,11 @@ export default function InnateSpellsList(props: {
                 .map((rank, index) => (
                   <div key={index} data-wg-name={`rank-group-${index}`}>
                     <Group wrap='nowrap' justify='space-between' gap={0}>
-                      <Text c='gray.5' fw={700} fz='sm'>
+                      <Text c='gray.2' fw={700} fz='sm'>
                         {rank === '0' ? 'Cantrips' : `${rankNumber(parseInt(rank))}`}
                       </Text>
-                      <Badge mr='sm' variant='outline' color='gray.5' size='xs'>
-                        <Text fz='sm' c='gray.5' span>
+                      <Badge mr='sm' variant='outline' color='gray.5' size='sm'>
+                        <Text c='gray.2' span inherit>
                           {props.hasFilters
                             ? innateSpells[rank].filter((s) => s.spell).length
                             : innateSpells[rank].length}

@@ -6,8 +6,8 @@ import { getWeaponStats } from '@items/weapon-handler';
 import { executeOperations } from '@operations/operations.main';
 import { getSpellStats } from '@spells/spell-handler';
 import { isCantrip, isRitual } from '@spells/spell-utils';
-import { LivingEntity, SourceValue } from '@typing/content';
-import { StoreID, VariableListStr, VariableStr } from '@typing/variables';
+import { LivingEntity, SourceValue } from '@schemas/content';
+import { StoreID, VariableListStr, VariableStr } from '@schemas/variables';
 import { displayResistWeak } from '@utils/resist-weaks';
 import { toLabel } from '@utils/strings';
 import { isCharacter, isCreature, isTruthy } from '@utils/type-fixing';
@@ -180,9 +180,9 @@ export async function getJsonV4Content(entity: LivingEntity, inputStoreID?: Stor
 
   const size = toLabel(getVariable<VariableStr>(STORE_ID, 'SIZE')?.value);
   const maxHP = getFinalHealthValue(STORE_ID);
-  const ac = getFinalAcValue(STORE_ID, getBestArmor(STORE_ID, entity.inventory)?.item);
-  const shield = getBestShield(STORE_ID, entity.inventory);
-  const armor = getBestArmor(STORE_ID, entity.inventory);
+  const ac = getFinalAcValue(STORE_ID, getBestArmor(STORE_ID, entity.inventory ?? undefined)?.item);
+  const shield = getBestShield(STORE_ID, entity.inventory ?? undefined);
+  const armor = getBestArmor(STORE_ID, entity.inventory ?? undefined);
 
   const speeds = getAllSpeedVariables(STORE_ID).map((v) => {
     return {

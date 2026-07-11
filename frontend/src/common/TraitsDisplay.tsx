@@ -14,14 +14,15 @@ import {
   useMantineTheme,
 } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
-import { Availability, Rarity, Size } from '@typing/content';
-import { useRecoilState } from 'recoil';
+import { Availability, Rarity, Size } from '@schemas/content';
+import { useAtom } from 'jotai';
 import RichText from './RichText';
 import { getTraitIdByType } from '@utils/traits';
 import { uniq } from 'lodash-es';
 import { toLabel } from '@utils/strings';
 import { getVariable } from '@variables/variable-manager';
-import { VariableBool } from '@typing/variables';
+import { VariableBool } from '@schemas/variables';
+import { IMPRINT_BG_COLOR, IMPRINT_BORDER_COLOR } from '@constants/data';
 
 export default function TraitsDisplay(props: {
   traitIds: number[];
@@ -39,7 +40,7 @@ export default function TraitsDisplay(props: {
   justify?: 'flex-start' | 'flex-end';
 }) {
   const theme = useMantineTheme();
-  const [_drawer, openDrawer] = useRecoilState(drawerState);
+  const [_drawer, openDrawer] = useAtom(drawerState);
 
   const { data: traits } = useQuery({
     queryKey: [
@@ -48,7 +49,7 @@ export default function TraitsDisplay(props: {
     ],
     queryFn: async ({ queryKey }) => {
       // @ts-ignore
-      // eslint-disable-next-line
+       
       const [_key, { traitIds }] = queryKey;
 
       if (traitIds.length === 0) return [];
@@ -189,7 +190,7 @@ export function SkillDisplay(props: { skill: string | string[]; interactable?: b
 
 export function FormulaDisplay(props: { interactable?: boolean; size?: MantineSize }) {
   const theme = useMantineTheme();
-  const [_drawer, openDrawer] = useRecoilState(drawerState);
+  const [_drawer, openDrawer] = useAtom(drawerState);
 
   return (
     <>
@@ -229,7 +230,7 @@ export function FormulaDisplay(props: { interactable?: boolean; size?: MantineSi
 
 export function BrokenDisplay(props: { interactable?: boolean; size?: MantineSize }) {
   const theme = useMantineTheme();
-  const [_drawer, openDrawer] = useRecoilState(drawerState);
+  const [_drawer, openDrawer] = useAtom(drawerState);
 
   const broken = getConditionByName('Broken')!;
 
@@ -417,8 +418,8 @@ export function SizeDisplay(props: { pfSize: Size; interactable?: boolean; size?
                   cursor: 'pointer',
                 },
                 root: {
-                  border: `1px solid ${theme.colors.dark[4]}`,
-                  backgroundColor: theme.colors.dark[6],
+                  border: `1px solid ${IMPRINT_BORDER_COLOR}`,
+                  backgroundColor: IMPRINT_BG_COLOR,
                   cursor: props.interactable ? 'pointer' : undefined,
                 },
               }}
@@ -443,7 +444,7 @@ export function TraitOverview(props: { name: string; description: string; import
       <Badge
         variant='dot'
         color='gray.0'
-        size={'xl'}
+        size='lg'
         styles={{
           root: {
             // @ts-ignore

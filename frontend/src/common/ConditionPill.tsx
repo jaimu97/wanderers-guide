@@ -1,11 +1,9 @@
 import { Button, Indicator, Pill, Text } from '@mantine/core';
 import BlurButton from './BlurButton';
+import { glassStyle } from '@utils/colors';
+import ImprintButton from './ImprintButton';
 
-export default function ConditionPill(props: {
-  text: string;
-  amount?: number;
-  onClick: () => void;
-}) {
+export default function ConditionPill(props: { text: string; amount?: number; onClick: () => void }) {
   return (
     // <Indicator
     //   disabled={!props.amount}
@@ -19,23 +17,25 @@ export default function ConditionPill(props: {
     //   <Pill>{props.text}</Pill>
     // </Indicator>
     <Button.Group>
-      <BlurButton size='compact-xs' c='gray.0' fw={400} onClick={props.onClick}>
+      <ImprintButton radius='xl' size='compact-xs' c='gray.0' fw={400} noBorder onClick={props.onClick}>
         {props.text}
-      </BlurButton>
+      </ImprintButton>
       {props.amount !== undefined && (
-        <Button
+        <ImprintButton
           radius='xl'
-          variant='light'
-          color='dark.2'
           size='compact-xs'
+          multiplier={2}
+          noBorder
+          style={{
+            position: 'relative',
+          }}
           w={30}
-          style={{ position: 'relative' }}
           onClick={props.onClick}
         >
           <Text c='gray.0' fz='xs'>
             {props.amount}
           </Text>
-        </Button>
+        </ImprintButton>
       )}
     </Button.Group>
   );

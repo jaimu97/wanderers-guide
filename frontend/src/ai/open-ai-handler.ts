@@ -5,8 +5,8 @@ import { fetchContentPackage, getDefaultSources } from '@content/content-store';
 import { calculateDifficulty } from '@pages/campaign/panels/EncountersPanel';
 import { getEntityLevel } from '@utils/entity-utils';
 import { makeRequest } from '@requests/request-manager';
-import { Campaign, CampaignNPC, CampaignSessionIdea, Character, Creature, Encounter, Trait } from '@typing/content';
-import { GranularCreature } from '@typing/index';
+import { Campaign, CampaignNPC, CampaignSessionIdea, Character, Creature, Encounter, Trait } from '@schemas/content';
+import { GranularCreature } from '@schemas/index';
 import { adjustCreature, findCreatureTraits } from '@utils/creature';
 import { selectRandom } from '@utils/random';
 import { isTruthy } from '@utils/type-fixing';
@@ -497,7 +497,7 @@ export async function generateEncounters(partyLevel: number, partySize: number, 
       name: data.name,
       icon: selectRandom(getAllIcons()),
       color: hexColor,
-      campaign_id: undefined,
+      campaign_id: null,
       combatants: {
         list: creatures.map((creature) => ({
           _id: crypto.randomUUID(),
@@ -514,7 +514,7 @@ export async function generateEncounters(partyLevel: number, partySize: number, 
         party_level: partyLevel,
         party_size: partySize,
       },
-    } satisfies Encounter;
+    } as any as Encounter;
   });
 
   // Auto scale the encounters

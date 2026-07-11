@@ -1,13 +1,13 @@
 import { ItemIcon } from '@common/ItemIcon';
 import { getConditionByName } from '@conditions/condition-handler';
 import { showNotification } from '@mantine/notifications';
-import { InventoryItem, Item, LivingEntity } from '@typing/content';
-import { StoreID, VariableListStr } from '@typing/variables';
+import { InventoryItem, Item, LivingEntity } from '@schemas/content';
+import { StoreID, VariableListStr } from '@schemas/variables';
 import { isCharacter } from '@utils/type-fixing';
 import { getVariable } from '@variables/variable-manager';
 import { labelToVariable } from '@variables/variable-utils';
 import { cloneDeep, uniq, uniqBy } from 'lodash-es';
-import { SetterOrUpdater } from 'recoil';
+import { SetterOrUpdater } from '@utils/type-fixing';
 import {
   getBulkLimit,
   getDefaultContainerContents,
@@ -333,7 +333,7 @@ export function addExtraItems(
                   ...item.meta_data,
                   base_item_content: baseItem,
                 }
-              : undefined,
+              : null,
           },
           is_formula: false,
           is_equipped: isItemEquippable(item),

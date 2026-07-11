@@ -8,9 +8,9 @@ import {
   SpellListEntry,
   SpellSlot,
   SpellSlotRecord,
-} from '@typing/content';
+} from '@schemas/content';
 import { rankNumber } from '@utils/numbers';
-import { SetterOrUpdater } from 'recoil';
+import { SetterOrUpdater } from '@utils/type-fixing';
 import { SpellSlotSelect } from '../SpellsPanel';
 import SpellListEntrySection from './SpellListEntrySection';
 import { detectSpells, getSpellcastingType } from '@spells/spell-utils';
@@ -19,8 +19,9 @@ import BlurButton from '@common/BlurButton';
 import { openContextModal } from '@mantine/modals';
 import { collectEntitySpellcasting } from '@content/collect-content';
 import { handleUpdateItemCharges } from '@items/inv-handlers';
-import { StoreID } from '@typing/variables';
+import { StoreID } from '@schemas/variables';
 import { cloneDeep, groupBy } from 'lodash-es';
+import ImprintButton from '@common/ImprintButton';
 
 export default function StaffSpellsList(props: {
   id: StoreID;
@@ -80,14 +81,15 @@ export default function StaffSpellsList(props: {
     <Accordion.Item value={props.index}>
       <Accordion.Control h={40}>
         <Group wrap='nowrap' justify='space-between' gap={0}>
-          <Text c='gray.5' fw={700} fz='sm'>
+          <Text c='gray.2' fw={700} fz='sm'>
             {props.staff.item.name}
           </Text>
 
           <Box mr={10}>
             <Group wrap='nowrap' gap={10}>
               {canAddPreparedExtraCharges && (
-                <BlurButton
+                <ImprintButton
+                  radius='xl'
                   size='compact-xs'
                   fw={500}
                   fz={10}
@@ -145,7 +147,7 @@ export default function StaffSpellsList(props: {
                   }}
                 >
                   Add Charges
-                </BlurButton>
+                </ImprintButton>
               )}
               <SpellSlotSelect
                 text='Staff Charges'
@@ -199,11 +201,11 @@ export default function StaffSpellsList(props: {
                 .map((rank, index) => (
                   <div key={index} data-wg-name={`rank-group-${index}`}>
                     <Group wrap='nowrap' justify='space-between' gap={0}>
-                      <Text c='gray.5' fw={700} fz='sm'>
+                      <Text c='gray.2' fw={700} fz='sm'>
                         {rank === '0' ? 'Cantrips' : `${rankNumber(parseInt(rank))}`}
                       </Text>
-                      <Badge mr='sm' variant='outline' color='gray.5' size='xs'>
-                        <Text fz='sm' c='gray.5' span>
+                      <Badge mr='sm' variant='outline' color='gray.5' size='sm'>
+                        <Text c='gray.2' span inherit>
                           {props.hasFilters
                             ? detectedSpells[rank].filter((s) => s.spell).length
                             : detectedSpells[rank].length}

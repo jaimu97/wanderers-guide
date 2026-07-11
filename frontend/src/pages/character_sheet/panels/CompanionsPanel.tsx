@@ -15,13 +15,13 @@ import {
 } from '@mantine/core';
 import { getHotkeyHandler, useHover, useMediaQuery } from '@mantine/hooks';
 import { useQuery } from '@tanstack/react-query';
-import { Creature, Trait } from '@typing/content';
-import { StoreID } from '@typing/variables';
+import { Creature, Trait } from '@schemas/content';
+import { StoreID } from '@schemas/variables';
 import { findCreatureTraits } from '@utils/creature';
 import { phoneQuery } from '@utils/mobile-responsive';
 import { evaluate } from 'mathjs';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useRecoilState } from 'recoil';
+import { useAtom } from 'jotai';
 import { confirmHealth } from '../entity-handler';
 import { DisplayIcon } from '@common/IconDisplay';
 import { sign } from '@utils/numbers';
@@ -37,10 +37,11 @@ import { modals } from '@mantine/modals';
 import { selectContent } from '@common/select/SelectContent';
 import { hasTraitType } from '@utils/traits';
 import { getEntityLevel } from '@utils/entity-utils';
+import { IMPRINT_BG_COLOR, IMPRINT_BG_COLOR_HOVER, IMPRINT_BORDER_COLOR } from '@constants/data';
 
 export default function CompanionsPanel(props: { panelHeight: number; panelWidth: number }) {
   const theme = useMantineTheme();
-  const [character, setCharacter] = useRecoilState(characterState);
+  const [character, setCharacter] = useAtom(characterState);
 
   // Calculated data for the companions
   const companions = character?.companions?.list ?? [];
@@ -67,7 +68,7 @@ export default function CompanionsPanel(props: { panelHeight: number; panelWidth
         }}
       >
         <Stack mt={20} gap={10}>
-          <Text ta='center' c='gray.5' fs='italic' fz='sm'>
+          <Text ta='center' c='gray.2' fs='italic' fz='sm'>
             No companions found, want to add one?
           </Text>
           <Group justify='center'>
@@ -181,7 +182,7 @@ function CompanionCard(props: {
   const isPhone = useMediaQuery(phoneQuery());
   const { hovered, ref } = useHover();
 
-  const [creatureDrawer, openCreatureDrawer] = useRecoilState(creatureDrawerState);
+  const [creatureDrawer, openCreatureDrawer] = useAtom(creatureDrawerState);
 
   // Health
 
@@ -259,7 +260,7 @@ function CompanionCard(props: {
         w={`min(60dvw, 320px)`}
         p={5}
         style={(t) => ({
-          backgroundColor: hovered ? t.colors.dark[5] : t.colors.dark[6],
+          backgroundColor: hovered ? IMPRINT_BG_COLOR_HOVER : IMPRINT_BG_COLOR,
           borderRadius: t.radius.md,
           cursor: 'pointer',
           position: 'relative',
@@ -329,7 +330,7 @@ function CompanionCard(props: {
               height: '100%',
             },
             input: {
-              backgroundColor: t.colors.dark[6],
+              backgroundColor: IMPRINT_BG_COLOR,
               borderRadius: t.radius.md,
               height: '100%',
             },
@@ -494,7 +495,7 @@ async function computeCompanions(companions: Creature[]) {
 }
 
 function AddCompanionSection() {
-  const [character, setCharacter] = useRecoilState(characterState);
+  const [character, setCharacter] = useAtom(characterState);
   const [selectedType, setSelectedType] = useState<number | null>(null);
   const isPhone = useMediaQuery(phoneQuery());
 
@@ -535,12 +536,12 @@ function AddCompanionSection() {
     <Box
       p='xs'
       style={(t) => ({
-        backgroundColor: t.colors.dark[6],
+        backgroundColor: IMPRINT_BG_COLOR,
         borderRadius: t.radius.xl,
       })}
     >
       <Group gap={0} align='center' justify='center'>
-        <Text c='gray.5' mx={10}>
+        <Text c='gray.2' mx={10}>
           Add
         </Text>
         <Select
@@ -588,6 +589,8 @@ function AddCompanionSection() {
               borderTopRightRadius: 0,
               borderBottomRightRadius: 0,
               '--input-placeholder-color': theme.colors.gray[6],
+              backgroundColor: IMPRINT_BG_COLOR,
+              borderColor: IMPRINT_BORDER_COLOR,
             },
           })}
         />
@@ -621,6 +624,8 @@ function AddCompanionSection() {
               borderTopLeftRadius: 0,
               borderBottomLeftRadius: 0,
               '--input-placeholder-color': theme.colors.gray[6],
+              backgroundColor: IMPRINT_BG_COLOR,
+              borderColor: IMPRINT_BORDER_COLOR,
             },
           })}
         />

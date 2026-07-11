@@ -2,12 +2,13 @@ import { EllipsisText } from '@common/EllipsisText';
 import { Icon } from '@common/Icon';
 import RichTextInput from '@common/rich_text_input/RichTextInput';
 import { GUIDE_BLUE } from '@constants/data';
-import { Tabs, ActionIcon, ScrollArea, Title, Box, Menu, Button } from '@mantine/core';
+import { glassStyle } from '@utils/colors';
+import { Tabs, ActionIcon, Badge, Group, ScrollArea, Title, Box, Menu, Button } from '@mantine/core';
 import { useDebouncedState, useDidUpdate } from '@mantine/hooks';
 import { openContextModal } from '@mantine/modals';
 import { IconCheck, IconPlus, IconSettings } from '@tabler/icons-react';
 import { JSONContent } from '@tiptap/react';
-import { Campaign } from '@typing/content';
+import { Campaign } from '@schemas/content';
 import { isPhoneSized } from '@utils/mobile-responsive';
 import useRefresh from '@utils/use-refresh';
 import { cloneDeep, truncate } from 'lodash-es';
@@ -69,7 +70,10 @@ export default function NotesPanel(props: {
     setActiveTab(`${newPages.length - 1}`);
   };
 
-  const getPage = (page: { name: string; icon: string; color: string; contents: JSONContent }, index: number) => {
+  const getPage = (
+    page: { name: string; icon: string; color: string; shared?: boolean; contents: JSONContent | null },
+    index: number
+  ) => {
     return (
       <ScrollArea h={props.panelHeight} scrollbars='y'>
         <RichTextInput
@@ -85,22 +89,25 @@ export default function NotesPanel(props: {
           <Menu shadow='md' width={160}>
             <Menu.Target>
               <Button
-                variant='light'
+                variant='gradient'
                 aria-label={`Page Settings`}
                 size='xs'
                 radius='xl'
+                gradient={{
+                  from: page.color || 'gray.5',
+                  to: page.color || 'gray.5',
+                }}
                 color={isPhone ? page.color || 'gray.5' : 'gray.5'}
                 style={{
                   position: 'absolute',
                   bottom: 10,
                   left: 10,
                   //
-                  backdropFilter: 'blur(12px)',
-                  WebkitBackdropFilter: 'blur(12px)',
+                  ...glassStyle(),
                 }}
                 w={130}
                 leftSection={
-                  <ActionIcon variant='transparent' size='xs' color={page.color}>
+                  <ActionIcon variant='transparent' size='xs' color={isPhone ? 'white' : page.color}>
                     <Icon name={page.icon} size='1rem' />
                   </ActionIcon>
                 }
@@ -126,7 +133,6 @@ export default function NotesPanel(props: {
                       </ActionIcon>
                     ) : undefined
                   }
-                  color={page.color}
                   onClick={() => {
                     setActiveTab(`${index}`);
                   }}
@@ -156,64 +162,78 @@ export default function NotesPanel(props: {
             </Menu.Dropdown>
           </Menu>
         )}
-        <ActionIcon
-          variant={isPhone ? 'light' : 'subtle'}
-          aria-label={`Page Settings`}
-          size='md'
-          radius='xl'
-          color={isPhone ? page.color || 'gray.5' : 'gray.5'}
+        <Group
+          gap={4}
+          align='center'
           style={{
             position: 'absolute',
             top: isPhone ? undefined : 10,
             bottom: isPhone ? 10 : undefined,
             left: isPhone ? 150 : undefined,
             right: isPhone ? undefined : 10,
-            //
-            backdropFilter: 'blur(12px)',
-            WebkitBackdropFilter: 'blur(12px)',
-          }}
-          onClick={() => {
-            openContextModal({
-              modal: 'updateNotePage',
-              title: <Title order={3}>Update Page</Title>,
-              innerProps: {
-                page: page,
-                onUpdate: (name: string, icon: string, color: string) => {
-                  if (!props.campaign) return;
-                  const newPages = cloneDeep(pages);
-                  newPages[index] = {
-                    ...newPages[index],
-                    name: name,
-                    icon: icon,
-                    color: color,
-                  };
-                  props.setCampaign({
-                    ...props.campaign,
-                    notes: {
-                      ...props.campaign.notes,
-                      pages: newPages,
-                    },
-                  });
-                },
-                onDelete: () => {
-                  if (!props.campaign) return;
-                  const newPages = cloneDeep(pages);
-                  newPages.splice(index, 1);
-                  props.setCampaign({
-                    ...props.campaign,
-                    notes: {
-                      ...props.campaign.notes,
-                      pages: newPages,
-                    },
-                  });
-                  setActiveTab(`0`);
-                },
-              },
-            });
+            flexDirection: isPhone ? 'row-reverse' : 'row',
           }}
         >
-          <IconSettings size='1.2rem' />
-        </ActionIcon>
+          {page.shared && (
+            <Badge size='md' variant='light' color='guide'>
+              Shared
+            </Badge>
+          )}
+          <ActionIcon
+            variant={isPhone ? 'gradient' : 'subtle'}
+            aria-label={`Page Settings`}
+            size='md'
+            radius='xl'
+            gradient={{
+              from: page.color || 'gray.5',
+              to: page.color || 'gray.5',
+            }}
+            color={isPhone ? page.color || 'gray.5' : 'gray.5'}
+            onClick={() => {
+              openContextModal({
+                modal: 'updateNotePage',
+                title: <Title order={3}>Update Page</Title>,
+                innerProps: {
+                  page: page,
+                  isInCampaign: true,
+                  onUpdate: (name: string, icon: string, color: string, shared: boolean) => {
+                    if (!props.campaign) return;
+                    const newPages = cloneDeep(pages);
+                    newPages[index] = {
+                      ...newPages[index],
+                      name: name,
+                      icon: icon,
+                      color: color,
+                      shared: shared,
+                    };
+                    props.setCampaign({
+                      ...props.campaign,
+                      notes: {
+                        ...props.campaign.notes,
+                        pages: newPages,
+                      },
+                    });
+                  },
+                  onDelete: () => {
+                    if (!props.campaign) return;
+                    const newPages = cloneDeep(pages);
+                    newPages.splice(index, 1);
+                    props.setCampaign({
+                      ...props.campaign,
+                      notes: {
+                        ...props.campaign.notes,
+                        pages: newPages,
+                      },
+                    });
+                    setActiveTab(`0`);
+                  },
+                },
+              });
+            }}
+          >
+            <IconSettings size='1.2rem' />
+          </ActionIcon>
+        </Group>
       </ScrollArea>
     );
   };
@@ -236,7 +256,7 @@ export default function NotesPanel(props: {
           },
         }}
       >
-        <Tabs.List w={190} h={props.panelHeight}>
+        <Tabs.List miw={190} h={props.panelHeight}>
           {pages.map((page, index) => (
             <Tabs.Tab
               key={index}

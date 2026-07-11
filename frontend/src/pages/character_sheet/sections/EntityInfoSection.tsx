@@ -4,18 +4,20 @@ import BlurButton from '@common/BlurButton';
 import { CharacterInfo } from '@common/CharacterInfo';
 import { useMantineTheme, Group, Stack, TextInput, Box, Text, Title } from '@mantine/core';
 import { getHotkeyHandler } from '@mantine/hooks';
-import { StoreID } from '@typing/variables';
+import { StoreID } from '@schemas/variables';
 import { useRef, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { SetterOrUpdater, useRecoilState } from 'recoil';
+import { useAtom } from 'jotai';
+import { SetterOrUpdater } from '@utils/type-fixing';
 import { confirmExperience, handleRest } from '../entity-handler';
 import tinyInputClasses from '@css/TinyBlurInput.module.css';
-import { Character, LivingEntity } from '@typing/content';
+import { Character, LivingEntity } from '@schemas/content';
 import { isCharacter, isCreature } from '@utils/type-fixing';
 import { CreatureDetailedInfo } from '@common/CreatureInfo';
-import { ICON_BG_COLOR } from '@constants/data';
+import { IMPRINT_BG_COLOR } from '@constants/data';
 import { modals } from '@mantine/modals';
 import { getEntityLevel } from '@utils/entity-utils';
+import ImprintButton from '@common/ImprintButton';
 
 export default function EntityInfoSection(this: any, props: {
   id: StoreID;
@@ -26,7 +28,7 @@ export default function EntityInfoSection(this: any, props: {
   const navigate = useNavigate();
   const theme = useMantineTheme();
 
-  const [_drawer, openDrawer] = useRecoilState(drawerState);
+  const [_drawer, openDrawer] = useAtom(drawerState);
 
   const expRef = useRef<HTMLInputElement>(null);
   const [exp, setExp] = useState<string | undefined>();
@@ -63,7 +65,7 @@ export default function EntityInfoSection(this: any, props: {
   const showLevelUpButton = isCharacter(props.entity) && (props.entity.experience || 0) >= 1000;
 
   return (
-    <BlurBox blur={10}>
+    <BlurBox>
       <Box
         pt='xs'
         pb={5}
@@ -117,11 +119,12 @@ export default function EntityInfoSection(this: any, props: {
           <Stack gap={10} justify='flex-start' pt={3}>
             <Stack gap={5}>
               <Box maw={80}>
-                <BlurButton
+                <ImprintButton
                   size='compact-xs'
-                  bgColor={ICON_BG_COLOR}
                   fw={500}
                   fullWidth
+                  radius='xl'
+                  noBorder
                   onClick={(e) => {
                     e.stopPropagation();
                     e.preventDefault();
@@ -132,14 +135,15 @@ export default function EntityInfoSection(this: any, props: {
                   href={isCharacter(props.entity) ? `/builder/${props.entity?.id}` : undefined}
                 >
                   Edit
-                </BlurButton>
+                </ImprintButton>
               </Box>
               <Box maw={80}>
-                <BlurButton
+                <ImprintButton
                   size='compact-xs'
-                  bgColor={ICON_BG_COLOR}
                   fw={500}
                   fullWidth
+                  radius='xl'
+                  noBorder
                   onClick={() => {
                     modals.openConfirmModal({
                       id: 'click-rest',
@@ -147,7 +151,7 @@ export default function EntityInfoSection(this: any, props: {
                       children: (
                         <Box>
                           <Text size='sm'>
-                            You will regain some HP (Con. mod × level), reset spell slots / focus points, and you might
+                            You will regain some HP (Con. mod × level), reset spell slots & focus points, and you may
                             recover from or improve certain conditions.
                           </Text>
                         </Box>
@@ -163,12 +167,12 @@ export default function EntityInfoSection(this: any, props: {
                   }}
                 >
                   Rest
-                </BlurButton>
+                </ImprintButton>
               </Box>
             </Stack>
             <Stack gap={0}>
               <Box maw={80}>
-                <Text fz='xs' ta='center' c='gray.3'>
+                <Text fz='xs' ta='center' c='gray.2'>
                   Lvl. {props.entity ? getEntityLevel(props.entity) : '?'}
                 </Text>
               </Box>

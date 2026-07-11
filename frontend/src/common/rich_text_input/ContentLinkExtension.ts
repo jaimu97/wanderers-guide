@@ -10,9 +10,9 @@ import {
   NodeWithPos,
 } from '@tiptap/core';
 import { MarkType } from '@tiptap/pm/model';
-import { ContentType, AbilityBlockType } from '@typing/content';
-import { SetterOrUpdater } from 'recoil';
-import { DrawerType } from '@typing/index';
+import { ContentType, AbilityBlockType } from '@schemas/content';
+import { SetterOrUpdater } from '@utils/type-fixing';
+import { DrawerType } from '@schemas/index';
 import { convertContentLink } from '@drawers/drawer-utils';
 
 interface LinkProtocolOptions {
@@ -96,7 +96,7 @@ export type DrawerStateGet = {
     | undefined;
 } | null;
 
-export type DrawerStateSet = SetterOrUpdater<{
+export type DrawerStateSet = (newValue: {
   type: DrawerType;
   data: any;
   extra?:
@@ -110,7 +110,7 @@ export type DrawerStateSet = SetterOrUpdater<{
           | undefined;
       }
     | undefined;
-} | null>;
+} | null) => void;
 
 export function ContentLink(_drawerState: DrawerState) {
   return Mark.create<LinkOptions>({

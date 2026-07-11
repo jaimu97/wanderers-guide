@@ -1,7 +1,7 @@
 import BlurButton from '@common/BlurButton';
 import { Badge, Box, Button, Text } from '@mantine/core';
 import ViewOperationsModal from '@modals/ViewOperationsModal';
-import { Operation } from '@typing/operations';
+import { Operation } from '@schemas/operations';
 import { useState } from 'react';
 
 export default function ShowOperationsButton(props: { name: string; operations?: Operation[] }) {
@@ -17,8 +17,8 @@ export default function ShowOperationsButton(props: { name: string; operations?:
         size='compact-sm'
         fullWidth
         rightSection={
-          <Badge mr='sm' variant='outline' color='guide.5' size='xs'>
-            <Text fz='sm' c='guide.5' span>
+          <Badge mr='sm' variant='outline' color='guide.5' size='sm'>
+            <Text c='guide.5' span inherit>
               {props.operations.length}
             </Text>
           </Badge>

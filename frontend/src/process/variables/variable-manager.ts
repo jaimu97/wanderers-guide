@@ -8,7 +8,7 @@ import {
   VariableValue,
   VariableNum,
   ExtendedVariableValue,
-} from '@typing/variables';
+} from '@schemas/variables';
 import {
   isAttributeValue,
   isProficiencyType,
@@ -39,7 +39,7 @@ export const HIDDEN_VARIABLES = [
   'INJECT_TEXT',
 ];
 
-const DEFAULT_VARIABLES: Record<string, Variable> = {
+export const DEFAULT_VARIABLES: Record<string, Variable> = {
   ATTRIBUTE_STR: newVariable('attr', 'ATTRIBUTE_STR'),
   ATTRIBUTE_DEX: newVariable('attr', 'ATTRIBUTE_DEX'),
   ATTRIBUTE_CON: newVariable('attr', 'ATTRIBUTE_CON'),
@@ -396,8 +396,8 @@ export function getVariableBonuses(
   id: StoreID,
   name: string
 ): {
-  value?: number | undefined;
-  type?: string | undefined;
+  value?: number | null;
+  type?: string | null;
   text: string;
   source: string;
   timestamp: number;
@@ -414,7 +414,7 @@ export function getVariableBonuses(
     }
     return {
       ...bonus,
-      value: bonus.value,
+      value: bonus.value ?? undefined,
     };
   });
 }

@@ -1,4 +1,5 @@
 import BlurBox from '@common/BlurBox';
+import { glassStyle } from '@utils/colors';
 import { CharacterDetailedInfo } from '@common/CharacterInfo';
 import DiceRoller from '@common/dice/DiceRoller';
 import {
@@ -36,7 +37,7 @@ import {
   IconCopy,
 } from '@tabler/icons-react';
 import { useQuery } from '@tanstack/react-query';
-import { Campaign, Character, Encounter } from '@typing/content';
+import { Campaign, Character, Encounter } from '@schemas/content';
 import { setPageTitle } from '@utils/document-change';
 import { isPhoneSized, tabletQuery } from '@utils/mobile-responsive';
 import { cloneDeep, truncate } from 'lodash-es';
@@ -52,11 +53,12 @@ import { showNotification } from '@mantine/notifications';
 import EncountersPanel from './panels/EncountersPanel';
 import ShopsPanel from './panels/ShopsPanel';
 import { sessionState } from '@atoms/supabaseAtoms';
-import { useRecoilValue } from 'recoil';
+import { useAtomValue } from 'jotai';
 import D20Loader from '@assets/images/D20Loader';
 import BlurButton from '@common/BlurButton';
 import BlurActionIcon from '@common/BlurActionIcon';
 import { getAnchorStyles } from '@utils/anchor';
+import ImprintButton from '@common/ImprintButton';
 
 export function Component() {
   const theme = useMantineTheme();
@@ -113,7 +115,7 @@ export function Component() {
 export function CampaignInner(props: { campaignId: number; onFinishLoading: () => void }) {
   const theme = useMantineTheme();
   const isTablet = useMediaQuery(tabletQuery());
-  const session = useRecoilValue(sessionState);
+  const session = useAtomValue(sessionState);
 
   const { data, isFetching, refetch } = useQuery({
     queryKey: [`find-campaign-${props.campaignId}`],
@@ -213,9 +215,9 @@ export function CampaignInner(props: { campaignId: number; onFinishLoading: () =
                           position: 'absolute',
                           top: 5,
                           right: 5,
-                          backgroundColor: 'rgba(0, 0, 0, 0.5)',
                           color: theme.colors.gray[4],
-                          backdropFilter: 'blur(6px)',
+                          ...glassStyle(),
+                          backgroundColor: 'rgba(0, 0, 0, 0.5)',
                         }}
                       >
                         {(characters?.length || 0) + ' players'}
@@ -223,17 +225,17 @@ export function CampaignInner(props: { campaignId: number; onFinishLoading: () =
 
                       <Card.Section className={classes.section} mb={0} px='md'>
                         <Group justify='apart'>
-                          <BlurBox bgColor='rgba(0, 0, 0, 0.5)' px='xs' py={5}>
+                          <BlurBox px='xs' py={5}>
                             <HoverCard shadow='md' openDelay={1000} position='top' withinPortal>
                               <HoverCard.Target>
-                                <Title c='gray.3' order={4} className={classes.name}>
+                                <Title c='gray.2' order={4} className={classes.name}>
                                   {truncate(campaign?.name || 'My Campaign', {
                                     length: 30,
                                   })}
                                 </Title>
                               </HoverCard.Target>
                               <HoverCard.Dropdown py={5} px={10}>
-                                <Text c='gray.3' size='md'>
+                                <Text c='gray.2' size='md'>
                                   {campaign?.name || 'My Campaign'}
                                 </Text>
                               </HoverCard.Dropdown>
@@ -241,7 +243,7 @@ export function CampaignInner(props: { campaignId: number; onFinishLoading: () =
                           </BlurBox>
                         </Group>
                         {campaign?.description?.trim() ? (
-                          <BlurBox bgColor='rgba(0, 0, 0, 0.5)' px='xs' py={5} mt={10}>
+                          <BlurBox px='xs' py={5} mt={10}>
                             <ScrollArea h={100} my={5}>
                               <Text fz='xs'>{campaign.description.trim()}</Text>
                             </ScrollArea>
@@ -256,8 +258,8 @@ export function CampaignInner(props: { campaignId: number; onFinishLoading: () =
                           radius='md'
                           size='xs'
                           variant='light'
-                          bgColor='rgba(0, 0, 0, 0.5)'
-                          bgColorHover='rgba(0, 0, 0, 0.7)'
+                          bgColor='rgba(0, 0, 0, 0.25)'
+                          bgColorHover='rgba(0, 0, 0, 0.35)'
                           color='gray.4'
                           onClick={() => {
                             setTimeout(() => setRevealedKey(false), 5000);
@@ -283,8 +285,8 @@ export function CampaignInner(props: { campaignId: number; onFinishLoading: () =
                           color='gray.4'
                           radius='md'
                           size={30}
-                          bgColor='rgba(0, 0, 0, 0.5)'
-                          bgColorHover='rgba(0, 0, 0, 0.7)'
+                          bgColor='rgba(0, 0, 0, 0.25)'
+                          bgColorHover='rgba(0, 0, 0, 0.35)'
                           onClick={async () => {
                             if (!campaign) return;
 
@@ -310,11 +312,11 @@ export function CampaignInner(props: { campaignId: number; onFinishLoading: () =
                   </Box>
                 </Grid.Col>
                 <Grid.Col span={isTablet ? 12 : 8}>
-                  <BlurBox blur={10} p='sm'>
+                  <BlurBox p='sm'>
                     <ScrollArea h={210} scrollbars='y'>
                       <Group>
                         {characters?.map((character) => (
-                          <BlurBox blur={10} maw={280} py={3} px='sm'>
+                          <BlurBox maw={280} py={3} px='sm'>
                             <CharacterDetailedInfo character={character} />
                           </BlurBox>
                         ))}
@@ -351,8 +353,7 @@ export function CampaignInner(props: { campaignId: number; onFinishLoading: () =
             size={40}
             variant='light'
             style={{
-              backdropFilter: 'blur(8px)',
-              WebkitBackdropFilter: 'blur(8px)',
+              ...glassStyle(),
             }}
             radius={100}
             aria-label='Dice Roller'
@@ -440,7 +441,7 @@ function SectionPanels(props: {
     return (
       <Box>
         {props.hideSections ? (
-          <BlurBox blur={10} p='sm' mih={props.panelHeight}>
+          <BlurBox p='sm' mih={props.panelHeight}>
             {activeTab === 'notes' && (
               <NotesPanel
                 campaign={props.campaign}
@@ -585,7 +586,7 @@ function SectionPanels(props: {
   } else {
     return (
       <Box>
-        <BlurBox blur={10} p='sm' mih={props.panelHeight}>
+        <BlurBox p='sm' mih={props.panelHeight}>
           <Tabs
             color='dark.6'
             variant='pills'

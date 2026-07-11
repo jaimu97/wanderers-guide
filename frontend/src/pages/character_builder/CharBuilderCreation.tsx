@@ -5,7 +5,7 @@ import { CharacterInfo } from '@common/CharacterInfo';
 import RichText from '@common/RichText';
 import ResultWrapper from '@common/operations/results/ResultWrapper';
 import { SelectContentButton, selectContent } from '@common/select/SelectContent';
-import { ICON_BG_COLOR_HOVER } from '@constants/data';
+import { IMPRINT_BG_COLOR, IMPRINT_BG_COLOR_HOVER, IMPRINT_BORDER_COLOR } from '@constants/data';
 import { fetchContent, fetchContentPackage, fetchContentSources, getDefaultSources } from '@content/content-store';
 import { getIconFromContentType } from '@content/content-utils';
 import classes from '@css/FaqSimple.module.css';
@@ -29,15 +29,24 @@ import {
 import { useElementSize, useHover, useInterval, useMediaQuery, useMergedRef } from '@mantine/hooks';
 import { openContextModal } from '@mantine/modals';
 import { getChoiceCounts } from '@operations/choice-count-tracker';
-import { OperationResult } from '@typing/operations';
+import { OperationResult } from '@schemas/operations';
 import { ObjectWithUUID, convertKeyToBasePrefix, hasOperationSelection } from '@operations/operation-utils';
 import { removeParentSelections } from '@operations/selection-tree';
 import { IconId, IconPuzzle } from '@tabler/icons-react';
 import { useQuery } from '@tanstack/react-query';
-import { AbilityBlock, Ancestry, Background, Character, Class, ClassArchetype, ContentPackage } from '@typing/content';
-import { ImageOption } from '@typing/index';
-import { OperationCharacterResultPackage, OperationSelect } from '@typing/operations';
-import { VariableListStr, VariableProf } from '@typing/variables';
+import {
+  AbilityBlock,
+  Ancestry,
+  Background,
+  Character,
+  Class,
+  ClassArchetype,
+  ContentPackage,
+  OperationCharacterResultPackage,
+} from '@schemas/content';
+import { ImageOption } from '@schemas/index';
+import { OperationSelect } from '@schemas/operations';
+import { VariableListStr, VariableProf } from '@schemas/variables';
 import { getAllPortraitImages } from '@utils/portrait-images';
 import { displayResistWeak } from '@utils/resist-weaks';
 import { isCharacterBuilderMobile } from '@utils/screen-sizes';
@@ -46,9 +55,11 @@ import { getAllSkillVariables, getVariable } from '@variables/variable-manager';
 import { compileProficiencyType, variableToLabel } from '@variables/variable-utils';
 import { isEqual, truncate } from 'lodash-es';
 import { useEffect, useRef, useState } from 'react';
-import { SetterOrUpdater, useRecoilState, useRecoilValue } from 'recoil';
+import { useAtom, useAtomValue } from 'jotai';
+import { SetterOrUpdater } from '@utils/type-fixing';
 import useCharacter from '@utils/use-character';
 import { phoneQuery } from '@utils/mobile-responsive';
+import ImprintButton from '@common/ImprintButton';
 
 // Determines how often to check for choice counts
 const CHOICE_COUNT_INTERVAL = 1500;
@@ -71,8 +82,6 @@ export default function CharBuilderCreation(props: { characterId: number; pageHe
     },
     refetchOnWindowFocus: false,
   });
-
-  console.log('Content for character builder creation:', content, getDefaultSources('PAGE'));
 
   // Just load progress manually
   const [percentage, setPercentage] = useState(0);
@@ -170,7 +179,7 @@ export function CharBuilderCreationInner(props: {
           <CharacterStatSidebar content={props.content} pageHeight={props.pageHeight} />
         </Box>
       )}
-      <Box style={{ flexBasis: isMobile ? '100%' : '65%' }}>
+      <Box style={{ flexBasis: isMobile ? '100%' : 'calc(65% - 10px)' }}>
         {isMobile && (
           <>
             <Group px='sm' justify='space-between' align='flex-start' wrap='nowrap'>
@@ -340,8 +349,8 @@ export function CharBuilderCreationInner(props: {
 
 function CharacterStatSidebar(props: { content: ContentPackage; pageHeight: number }) {
   const { ref, height } = useElementSize();
-  const [_drawer, openDrawer] = useRecoilState(drawerState);
-  const [character, setCharacter] = useRecoilState(characterState);
+  const [_drawer, openDrawer] = useAtom(drawerState);
+  const [character, setCharacter] = useAtom(characterState);
 
   return (
     <Stack gap={5}>
@@ -491,8 +500,7 @@ function CharacterStatSidebar(props: { content: ContentPackage; pageHeight: numb
       <ScrollArea h={props.pageHeight - height - 20} pr={14} scrollbars='y'>
         <Stack gap={5}>
           <Box>
-            <Button
-              variant='default'
+            <ImprintButton
               size='lg'
               fullWidth
               onClick={() => {
@@ -508,7 +516,7 @@ function CharacterStatSidebar(props: { content: ContentPackage; pageHeight: numb
                 <AttributeModPart attribute='Wis' variableName='ATTRIBUTE_WIS' />
                 <AttributeModPart attribute='Cha' variableName='ATTRIBUTE_CHA' />
               </Group>
-            </Button>
+            </ImprintButton>
           </Box>
           <StatButton
             onClick={() => {
@@ -1066,19 +1074,14 @@ export function StatButton(props: {
   disabled?: boolean;
   darkVersion?: boolean;
 }) {
-  const theme = useMantineTheme();
-  const { hovered, ref } = useHover<HTMLButtonElement>();
-
   return (
     <Box>
-      <Button
-        ref={ref}
+      <ImprintButton
         disabled={props.disabled}
-        variant='default'
         size='compact-lg'
         styles={{
           root: {
-            backgroundColor: props.darkVersion ? (hovered ? `#28292e` : `#212226`) : undefined,
+            border: `1px solid ${IMPRINT_BORDER_COLOR}`,
           },
           inner: {
             width: '100%',
@@ -1093,7 +1096,7 @@ export function StatButton(props: {
         <Group w='100%' justify='space-between' wrap='nowrap'>
           {props.children}
         </Group>
-      </Button>
+      </ImprintButton>
     </Box>
   );
 }
@@ -1107,7 +1110,7 @@ function LevelSection(props: {
   const theme = useMantineTheme();
   const [subSectionValue, setSubSectionValue] = useState<string | null>(null);
   const { hovered, ref } = useHover();
-  const [character, setCharacter] = useRecoilState(characterState);
+  const [character, setCharacter] = useAtom(characterState);
   const choiceCountRef = useRef<HTMLDivElement>(null);
   const mergedRef = useMergedRef(ref, choiceCountRef);
 
@@ -1155,7 +1158,7 @@ function LevelSection(props: {
   ) {
     if (props.level === 0) {
       return (
-        <Text fz='sm' mt={10} ta='center' c='gray.5' fs='italic'>
+        <Text fz='sm' mt={10} ta='center' c='gray.2' fs='italic'>
           Select an ancestry, background, and class to get started.
         </Text>
       );
@@ -1170,12 +1173,12 @@ function LevelSection(props: {
       ref={mergedRef}
       value={`${props.level}`}
       style={{
-        backgroundColor: hovered && !props.opened ? ICON_BG_COLOR_HOVER : undefined,
+        backgroundColor: hovered && !props.opened ? IMPRINT_BG_COLOR_HOVER : undefined,
       }}
     >
       <Accordion.Control>
         <Group wrap='nowrap' justify='space-between' gap={0}>
-          <Text c='gray.5' fw={700} fz='sm'>
+          <Text c='gray.2' fw={700} fz='sm'>
             {props.level === 0 ? (
               <>
                 Initial Stats{' '}
@@ -1188,7 +1191,7 @@ function LevelSection(props: {
             )}
           </Text>
           {choiceCounts.max > 0 && (
-            <Badge mr='sm' variant='outline' color='gray.5' size='xs'>
+            <Badge mr='sm' variant='outline' color='gray.5' size='sm'>
               <Text
                 fz='sm'
                 c={choiceCounts.current === choiceCounts.max ? 'gray.5' : theme.colors[theme.primaryColor][5]}
@@ -1197,7 +1200,7 @@ function LevelSection(props: {
               >
                 {choiceCounts.current}
               </Text>
-              <Text fz='sm' c='gray.5' span>
+              <Text fz='sm' c='gray.2' span>
                 /{choiceCounts.max}
               </Text>
             </Badge>
@@ -1352,7 +1355,7 @@ function ClassFeatureAccordionItem(props: {
       value={props.id}
       ref={ref}
       style={{
-        backgroundColor: hovered && !props.opened ? ICON_BG_COLOR_HOVER : undefined,
+        backgroundColor: hovered && !props.opened ? IMPRINT_BG_COLOR_HOVER : undefined,
       }}
       mt={3}
     >
@@ -1371,7 +1374,7 @@ function ClassFeatureAccordionItem(props: {
           </RichText>
           <DisplayOperationResult
             source={undefined}
-            level={props.feature.level}
+            level={props.feature.level ?? 0}
             results={props.results}
             onChange={(path, value) => {
               props.onSaveChanges(`${convertKeyToBasePrefix('classFeatureResults', props.feature.id)}_${path}`, value);
@@ -1416,7 +1419,7 @@ function AncestrySectionAccordionItem(props: {
       value={props.id}
       ref={ref}
       style={{
-        backgroundColor: hovered && !props.opened ? ICON_BG_COLOR_HOVER : undefined,
+        backgroundColor: hovered && !props.opened ? IMPRINT_BG_COLOR_HOVER : undefined,
       }}
       mt={3}
     >
@@ -1435,7 +1438,7 @@ function AncestrySectionAccordionItem(props: {
           </RichText>
           <DisplayOperationResult
             source={undefined}
-            level={props.section.level}
+            level={props.section.level ?? 0}
             results={props.results}
             onChange={(path, value) => {
               props.onSaveChanges(
@@ -1456,8 +1459,8 @@ function InitialStatsLevelSection(props: {
   onSaveChanges: (path: string, value: string) => void;
 }) {
   const [subSectionValue, setSubSectionValue] = useState<string | null>(null);
-  const [character, setCharacter] = useRecoilState(characterState);
-  const [_drawer, openDrawer] = useRecoilState(drawerState);
+  const [character, setCharacter] = useAtom(characterState);
+  const [_drawer, openDrawer] = useAtom(drawerState);
 
   const class_ = props.content.classes.find((class_) => class_.id === character?.details?.class?.id);
   const class_2 = props.content.classes.find((class_) => class_.id === character?.details?.class_2?.id);
@@ -1575,8 +1578,8 @@ function AncestryAccordionItem(props: {
   onSaveChanges: (path: string, value: string) => void;
   opened: boolean;
 }) {
-  const [character, setCharacter] = useRecoilState(characterState);
-  const [_drawer, openDrawer] = useRecoilState(drawerState);
+  const [character, setCharacter] = useAtom(characterState);
+  const [_drawer, openDrawer] = useAtom(drawerState);
   const { hovered, ref } = useHover();
 
   const choiceCountRef = useRef<HTMLDivElement>(null);
@@ -1645,7 +1648,7 @@ function AncestryAccordionItem(props: {
       value='ancestry'
       ref={ref}
       style={{
-        backgroundColor: hovered && !props.opened ? ICON_BG_COLOR_HOVER : undefined,
+        backgroundColor: hovered && !props.opened ? IMPRINT_BG_COLOR_HOVER : undefined,
       }}
       mt={3}
     >
@@ -1695,8 +1698,8 @@ function BackgroundAccordionItem(props: {
   onSaveChanges: (path: string, value: string) => void;
   opened: boolean;
 }) {
-  const [character, setCharacter] = useRecoilState(characterState);
-  const [_drawer, openDrawer] = useRecoilState(drawerState);
+  const [character, setCharacter] = useAtom(characterState);
+  const [_drawer, openDrawer] = useAtom(drawerState);
   const { hovered, ref } = useHover();
 
   const choiceCountRef = useRef<HTMLDivElement>(null);
@@ -1756,7 +1759,7 @@ function BackgroundAccordionItem(props: {
       value='background'
       ref={ref}
       style={{
-        backgroundColor: hovered && !props.opened ? ICON_BG_COLOR_HOVER : undefined,
+        backgroundColor: hovered && !props.opened ? IMPRINT_BG_COLOR_HOVER : undefined,
       }}
       mt={3}
     >
@@ -1803,8 +1806,8 @@ function ClassAccordionItem(props: {
   opened: boolean;
   isClass2?: boolean;
 }) {
-  const [character, setCharacter] = useRecoilState(characterState);
-  const [_drawer, openDrawer] = useRecoilState(drawerState);
+  const [character, setCharacter] = useAtom(characterState);
+  const [_drawer, openDrawer] = useAtom(drawerState);
   const { hovered, ref } = useHover();
 
   const choiceCountRef = useRef<HTMLDivElement>(null);
@@ -1865,7 +1868,7 @@ function ClassAccordionItem(props: {
       value={props.isClass2 ? 'class_2' : 'class'}
       ref={ref}
       style={{
-        backgroundColor: hovered && !props.opened ? ICON_BG_COLOR_HOVER : undefined,
+        backgroundColor: hovered && !props.opened ? IMPRINT_BG_COLOR_HOVER : undefined,
       }}
       mt={3}
     >
@@ -1918,7 +1921,7 @@ function BooksAccordionItem(props: {
 }) {
   const { hovered, ref } = useHover();
 
-  const character = useRecoilValue(characterState);
+  const character = useAtomValue(characterState);
 
   const choiceCountRef = useRef<HTMLDivElement>(null);
   const [choiceCounts, setChoiceCounts] = useState<{
@@ -1944,7 +1947,7 @@ function BooksAccordionItem(props: {
       value='books'
       ref={ref}
       style={{
-        backgroundColor: hovered && !props.opened ? ICON_BG_COLOR_HOVER : undefined,
+        backgroundColor: hovered && !props.opened ? IMPRINT_BG_COLOR_HOVER : undefined,
       }}
       mt={3}
     >
@@ -2008,7 +2011,7 @@ function ItemsAccordionItem(props: {
       value='items'
       ref={ref}
       style={{
-        backgroundColor: hovered && !props.opened ? ICON_BG_COLOR_HOVER : undefined,
+        backgroundColor: hovered && !props.opened ? IMPRINT_BG_COLOR_HOVER : undefined,
       }}
       mt={3}
     >
@@ -2048,7 +2051,7 @@ function CustomAccordionItem(props: {
 }) {
   const { hovered, ref } = useHover();
 
-  const character = useRecoilValue(characterState);
+  const character = useAtomValue(characterState);
 
   const choiceCountRef = useRef<HTMLDivElement>(null);
   const [choiceCounts, setChoiceCounts] = useState<{
@@ -2076,7 +2079,7 @@ function CustomAccordionItem(props: {
       value='custom'
       ref={ref}
       style={{
-        backgroundColor: hovered && !props.opened ? ICON_BG_COLOR_HOVER : undefined,
+        backgroundColor: hovered && !props.opened ? IMPRINT_BG_COLOR_HOVER : undefined,
       }}
       mt={3}
     >

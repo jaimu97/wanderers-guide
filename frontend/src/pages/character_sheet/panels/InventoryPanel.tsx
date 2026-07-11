@@ -45,18 +45,22 @@ import {
   TextInput,
   Title,
   useMantineTheme,
+  useMantineColorScheme,
 } from '@mantine/core';
 import { modals, openContextModal } from '@mantine/modals';
 import { CreateItemModal } from '@modals/CreateItemModal';
 import { StatButton } from '@pages/character_builder/CharBuilderCreation';
 import { IconCoins, IconMenu2, IconPlus, IconSearch, IconX } from '@tabler/icons-react';
-import { Character, ContentPackage, Inventory, InventoryItem, Item, LivingEntity, Trait } from '@typing/content';
-import { StoreID } from '@typing/variables';
+import { Character, ContentPackage, Inventory, InventoryItem, Item, LivingEntity, Trait } from '@schemas/content';
+import { StoreID } from '@schemas/variables';
 import { isPhoneSized } from '@utils/mobile-responsive';
 import { sign } from '@utils/numbers';
 import { cloneDeep, truncate } from 'lodash-es';
 import { useState } from 'react';
-import { SetterOrUpdater, useRecoilState } from 'recoil';
+import { useAtom } from 'jotai';
+import { SetterOrUpdater } from '@utils/type-fixing';
+import { IMPRINT_BG_COLOR, IMPRINT_BORDER_COLOR } from '@constants/data';
+import ImprintButton from '@common/ImprintButton';
 
 export default function InventoryPanel(props: {
   id: StoreID;
@@ -68,9 +72,10 @@ export default function InventoryPanel(props: {
   zIndex?: number;
 }) {
   const theme = useMantineTheme();
+  const { colorScheme } = useMantineColorScheme();
   const isPhone = isPhoneSized(props.panelWidth);
   const [searchQuery, setSearchQuery] = useState('');
-  const [_drawer, openDrawer] = useRecoilState(drawerState);
+  const [_drawer, openDrawer] = useAtom(drawerState);
 
   const [creatingCustomItem, setCreatingCustomItem] = useState(false);
 
@@ -109,7 +114,7 @@ export default function InventoryPanel(props: {
           <Title order={3}>Add Items</Title>
           <Button
             variant='light'
-            color={theme.colors['gray'][6]}
+            color='gray'
             size='compact-xs'
             mr={5}
             onClick={() => {
@@ -240,8 +245,8 @@ export default function InventoryPanel(props: {
             }
             styles={{
               input: {
-                backgroundColor: 'rgba(0, 0, 0, 0.3)',
-                borderColor: searchQuery.trim().length > 0 ? theme.colors['guide'][8] : undefined,
+                backgroundColor: IMPRINT_BG_COLOR,
+                borderColor: searchQuery.trim().length > 0 ? theme.colors['guide'][8] : 'transparent',
               },
             }}
           />
@@ -254,7 +259,8 @@ export default function InventoryPanel(props: {
                   size='lg'
                   aria-label='Inventory Options'
                   style={{
-                    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+                    backgroundColor: IMPRINT_BG_COLOR,
+                    borderColor: IMPRINT_BORDER_COLOR,
                   }}
                 >
                   <IconMenu2 style={{ width: '70%', height: '70%' }} stroke={1.5} />
@@ -263,7 +269,8 @@ export default function InventoryPanel(props: {
 
               <Menu.Dropdown>
                 <Menu.Label>
-                  Bulk: {labelizeBulk(getInvBulk(props.entity?.inventory), true)} / {getBulkLimit(props.id)}{' '}
+                  Bulk: {labelizeBulk(getInvBulk(props.entity?.inventory ?? undefined), true)} /{' '}
+                  {getBulkLimit(props.id)}{' '}
                 </Menu.Label>
                 <Menu.Item
                   leftSection={<IconPlus style={{ width: rem(14), height: rem(14) }} />}
@@ -291,12 +298,10 @@ export default function InventoryPanel(props: {
                   },
                 }}
               >
-                Bulk: {labelizeBulk(getInvBulk(props.entity?.inventory), true)} / {getBulkLimit(props.id)}
+                Bulk: {labelizeBulk(getInvBulk(props.entity?.inventory ?? undefined), true)} / {getBulkLimit(props.id)}
               </Badge>
               <CurrencySection entity={props.entity} onClick={() => openManageCoinsDrawer()} />
-              <Button
-                color='dark.5'
-                style={{ borderColor: theme.colors.dark[4] }}
+              <ImprintButton
                 radius='xl'
                 size='sm'
                 fw={500}
@@ -304,7 +309,7 @@ export default function InventoryPanel(props: {
                 onClick={() => openAddItemDrawer()}
               >
                 Add Item
-              </Button>
+              </ImprintButton>
             </Group>
           )}
         </Group>
@@ -468,7 +473,7 @@ export default function InventoryPanel(props: {
                             </StatButton>
                           ))}
                           {invItem?.container_contents.length === 0 && (
-                            <Text c='gray.7' fz='sm' ta='center' fs='italic'>
+                            <Text fz='sm' ta='center' fs='italic'>
                               Container is empty
                             </Text>
                           )}
@@ -530,7 +535,7 @@ export default function InventoryPanel(props: {
                 </Box>
               ))}
             {invItems.length === 0 && (
-              <Text c='gray.5' fz='sm' ta='center' fs='italic' py={20}>
+              <Text c='gray.2' fz='sm' ta='center' fs='italic' py={20}>
                 Your inventory is empty,{' '}
                 <Anchor fz='sm' fs='italic' onClick={() => openAddItemDrawer()}>
                   add some items
@@ -665,8 +670,7 @@ function InvItemOption(props: {
             {props.invItem.item.name}
           </Text>
           {isItemContainer(props.invItem.item) && props.hideSections && (
-            <Button
-              variant='light'
+            <ImprintButton
               size='compact-xs'
               radius='xl'
               onClick={(e) => {
@@ -676,15 +680,15 @@ function InvItemOption(props: {
               }}
             >
               View Item
-            </Button>
+            </ImprintButton>
           )}
 
           {isItemWeapon(props.invItem.item) && weaponStats && (
             <Group wrap='nowrap' gap={10} maw={300}>
-              <Text c='gray.6' fz='xs' fs='italic' span>
+              <Text c='gray.5' fz='xs' fs='italic' span>
                 {sign(weaponStats.attack_bonus.total[0])}
               </Text>
-              <EllipsisText c='gray.6' fz='xs' fs='italic' span>
+              <EllipsisText c='gray.5' fz='xs' fs='italic' span>
                 {truncate(
                   `${weaponStats.damage.dice}${weaponStats.damage.die}${weaponStats.damage.bonus.total > 0 ? ` + ${weaponStats.damage.bonus.total}` : ``} ${weaponStats.damage.damageType}${parseOtherDamage(weaponStats.damage.other)}${weaponStats.damage.extra ? ` + ${weaponStats.damage.extra}` : ''}`,
                   { length: props.isPhone ? 15 : 45 }
@@ -724,7 +728,16 @@ function InvItemOption(props: {
                 <>
                   {' '}
                   <Text ta='left' fz='xs'>
-                    {priceToString(props.invItem.item.price)}
+                    {priceToString(
+                      props.invItem.item.price
+                        ? {
+                            cp: Number(props.invItem.item.price.cp) || undefined,
+                            sp: Number(props.invItem.item.price.sp) || undefined,
+                            gp: Number(props.invItem.item.price.gp) || undefined,
+                            pp: Number(props.invItem.item.price.pp) || undefined,
+                          }
+                        : undefined
+                    )}
                   </Text>
                 </>
               )}
@@ -739,7 +752,9 @@ function InvItemOption(props: {
               size='compact-xs'
               variant={props.invItem.is_invested ? 'subtle' : 'outline'}
               color={props.invItem.is_invested ? 'gray.7' : undefined}
-              disabled={!props.invItem.is_invested && reachedInvestedLimit(props.id, props.entity?.inventory)}
+              disabled={
+                !props.invItem.is_invested && reachedInvestedLimit(props.id, props.entity?.inventory ?? undefined)
+              }
               onClick={(e) => {
                 e.stopPropagation();
                 e.preventDefault();
@@ -755,7 +770,9 @@ function InvItemOption(props: {
               size='compact-xs'
               variant={props.invItem.is_implanted ? 'subtle' : 'outline'}
               color={props.invItem.is_implanted ? 'gray.7' : undefined}
-              disabled={!props.invItem.is_implanted && reachedImplantLimit(props.id, props.entity?.inventory)}
+              disabled={
+                !props.invItem.is_implanted && reachedImplantLimit(props.id, props.entity?.inventory ?? undefined)
+              }
               onClick={(e) => {
                 e.stopPropagation();
                 e.preventDefault();

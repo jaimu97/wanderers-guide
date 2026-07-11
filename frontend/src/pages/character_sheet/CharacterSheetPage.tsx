@@ -1,4 +1,5 @@
 import D20Loader from '@assets/images/D20Loader';
+import { glassStyle } from '@utils/colors';
 import BlurBox from '@common/BlurBox';
 import { defineDefaultSources, fetchContentPackage, fetchContentSources } from '@content/content-store';
 
@@ -35,15 +36,15 @@ import {
   IconX,
 } from '@tabler/icons-react';
 import { useQuery } from '@tanstack/react-query';
-import { Character, ContentPackage, LivingEntity } from '@typing/content';
-import { VariableListStr } from '@typing/variables';
+import { Character, ContentPackage, LivingEntity } from '@schemas/content';
+import { VariableListStr } from '@schemas/variables';
 import { setPageTitle } from '@utils/document-change';
 import { isPhoneSized, phoneQuery, tabletQuery } from '@utils/mobile-responsive';
 import { toLabel } from '@utils/strings';
 import { getVariable } from '@variables/variable-manager';
-import { Suspense, lazy, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useLoaderData } from 'react-router-dom';
-import { SetterOrUpdater } from 'recoil';
+import { SetterOrUpdater } from '@utils/type-fixing';
 import CompanionsPanel from './panels/CompanionsPanel';
 import DetailsPanel from './panels/DetailsPanel';
 import ExtrasPanel from './panels/ExtrasPanel';
@@ -66,7 +67,15 @@ import CampaignDrawer from '@pages/campaign/CampaignDrawer';
 import useCharacter from '@utils/use-character';
 import { getAnchorStyles } from '@utils/anchor';
 import { AnimatePresence, motion } from 'framer-motion';
+import { IMPRINT_BG_COLOR, IMPRINT_BORDER_COLOR } from '@constants/data';
 
+/**
+ * Top-level route component for the character sheet page.
+ * Handles fetching the content package and showing a loading screen
+ * until the data is ready. Once loaded, renders CharacterSheetInner
+ * while keeping the loader visible until the inner component signals
+ * that it has finished its own initialization (EXECUTE_OPS).
+ */
 export function Component(props: {}) {
   useEffect(() => {
     setPageTitle(`Sheet`);
@@ -98,7 +107,9 @@ export function Component(props: {}) {
     refetchOnWindowFocus: false,
   });
 
-  // Just load progress manually
+  // Manually animate the loader progress bar so it feels responsive even
+  // while waiting for the server. Once content arrives the bar jumps to
+  // at least 50%, then CharacterSheetInner drives it to 100 via onFinishLoading.
   const [_p, setPercentage] = useState(0);
   const percentage = content && !doneLoading ? Math.max(_p, 50) : _p;
   const interval = useInterval(() => setPercentage(percentage + 2), 50);
@@ -130,6 +141,9 @@ export function Component(props: {}) {
   if (isFetching || !content) {
     return loader;
   } else {
+    // Render both elements simultaneously so CharacterSheetInner can run
+    // EXECUTE_OPS in the background while the loader is still visible.
+    // CSS display toggling avoids unmounting/remounting the heavy inner tree.
     return (
       <>
         <div style={{ display: doneLoading ? 'none' : undefined }}>{loader}</div>
@@ -148,15 +162,23 @@ export function Component(props: {}) {
   }
 }
 
+/**
+ * Main character sheet layout. Renders the top info/stat sections and the
+ * tabbed panel area. Also owns the floating action buttons anchored to the
+ * bottom-left corner (modes and campaign).
+ */
 function CharacterSheetInner(props: { content: ContentPackage; characterId: number; onFinishLoading: () => void }) {
   const isTablet = useMediaQuery(tabletQuery());
   const isPhone = useMediaQuery(phoneQuery());
   const { ref, width, height } = useElementSize();
 
+  // Reserve 60px for the tab bar; clamp panel height based on screen height
   const panelWidth = width ? width - 60 : 2000;
   const panelHeight = height > 800 ? 555 : 500;
   const [hideSections, setHideSections] = useState(false);
 
+  // EXECUTE_OPS triggers the character's operation pipeline and calls
+  // onFinishLoading when it completes, which dismisses the loading screen.
   const { character, setCharacter, isLoading, saveCharacter } = useCharacter(props.characterId, {
     type: 'EXECUTE_OPS',
     data: {
@@ -173,6 +195,8 @@ function CharacterSheetInner(props: { content: ContentPackage; characterId: numb
   const [openedCampaign, setOpenedCampaign] = useState(false);
   const [openedModes, setOpenedModes] = useState(false);
 
+  // Filter ability blocks to only those of type 'mode' that are listed in MODE_IDS.
+  // Recalculates whenever character state or loading status changes.
   const modes = useMemo(() => {
     const givenModeIds = getVariable<VariableListStr>('CHARACTER', 'MODE_IDS')?.value || [];
     return props.content.abilityBlocks.filter((block) => block.type === 'mode' && givenModeIds.includes(block.id + ''));
@@ -181,9 +205,10 @@ function CharacterSheetInner(props: { content: ContentPackage; characterId: numb
 
   return (
     <Center>
-      <Box maw={1000} w='100%' pb='sm'>
+      <Box maw={1000} w='100%' pb={isPhone ? 100 : 'sm'}>
         <Box ref={ref}>
           <Stack gap='xs' style={{ position: 'relative' }}>
+            {/* Top stat sections: layout collapses from 3 → 2 → 1 columns on smaller screens */}
             <SimpleGrid cols={isPhone ? 1 : isTablet ? 2 : 3} spacing='xs' verticalSpacing='xs'>
               <EntityInfoSection
                 id='CHARACTER'
@@ -191,6 +216,7 @@ function CharacterSheetInner(props: { content: ContentPackage; characterId: numb
                 setEntity={convertToSetEntity(setCharacter)}
                 saveEntity={saveCharacter}
               />
+              {/* On phone, these sections are hidden when a full-screen panel is active */}
               {!hideSections && (
                 <>
                   <HealthSection id='CHARACTER' entity={character} setEntity={convertToSetEntity(setCharacter)} />
@@ -214,16 +240,18 @@ function CharacterSheetInner(props: { content: ContentPackage; characterId: numb
           </Stack>
         </Box>
       </Box>
+
+      {/* Floating action buttons anchored to the bottom-left corner */}
       <Box style={getAnchorStyles({ l: 20, b: 20 })}>
         <Stack>
+          {/* Modes button – only shown when the character has at least one mode */}
           {modes.length > 0 && (
             <Indicator disabled={activeModes.length === 0} label={activeModes.length} size={14} offset={4}>
               <ActionIcon
                 size={40}
                 variant='light'
                 style={{
-                  backdropFilter: 'blur(8px)',
-                  WebkitBackdropFilter: 'blur(8px)',
+                  ...glassStyle(),
                 }}
                 radius={100}
                 aria-label='Modes'
@@ -235,13 +263,13 @@ function CharacterSheetInner(props: { content: ContentPackage; characterId: numb
               </ActionIcon>
             </Indicator>
           )}
+          {/* Campaign button – only shown when the character belongs to a campaign */}
           {character?.campaign_id && (
             <ActionIcon
               size={40}
               variant='light'
               style={{
-                backdropFilter: 'blur(8px)',
-                WebkitBackdropFilter: 'blur(8px)',
+                ...glassStyle(),
               }}
               radius={100}
               aria-label='Campaigns View'
@@ -262,6 +290,18 @@ function CharacterSheetInner(props: { content: ContentPackage; characterId: numb
   );
 }
 
+/**
+ * Renders the tabbed panel area of the character sheet.
+ *
+ * On phone: shows a single full-screen panel at a time, with a floating
+ * grid button (bottom-right) that opens a popover to switch panels.
+ * The top stat sections are hidden while a panel is active to maximise
+ * vertical space.
+ *
+ * On desktop/tablet: renders a standard Mantine Tabs bar. Tabs that the
+ * user has marked as "primary" appear directly in the bar; the rest are
+ * accessible via the "..." overflow menu.
+ */
 function SectionPanels(props: {
   content: ContentPackage;
   entity: LivingEntity | null;
@@ -275,12 +315,16 @@ function SectionPanels(props: {
   const theme = useMantineTheme();
   const isPhone = isPhoneSized(props.panelWidth);
 
+  // Controls visibility of the mobile panel-picker popover
   const [openedPhonePanel, setOpenedPhonePanel] = useState(false);
 
+  // null until the character finishes loading, then defaults to 'skills-actions'
   const [activeTab, setActiveTab] = useState<string | null>(null);
   const { hovered: hoveredTabOptions, ref: tabOptionsRef } = useHover<HTMLButtonElement>();
 
   const iconStyle = { width: rem(12), height: rem(12) };
+
+  // Full ordered list of all available sheet tabs
   const allSheetTabs = [
     'dice-roller',
     'skills-actions',
@@ -292,11 +336,17 @@ function SectionPanels(props: {
     'notes',
     'extras',
   ];
+  // PRIMARY_SHEET_TABS is a character-level variable that determines which tabs
+  // are shown directly in the tab bar vs hidden behind the "..." overflow menu.
+  // The integrated dice roller is always primary rather than a floating drawer.
   const userPrimarySheetTabs = getVariable<VariableListStr>('CHARACTER', 'PRIMARY_SHEET_TABS')?.value ?? [];
-  // dice-roller as the primary tab instead of the side panel
   const primarySheetTabs = ['dice-roller', ...userPrimarySheetTabs.filter((tab) => tab !== 'dice-roller')];
   const tabOptions = allSheetTabs.filter((tab) => !primarySheetTabs.includes(tab));
+
+  // True when the currently active tab is one of the overflow (non-primary) tabs,
+  // used to highlight the "..." button to indicate a hidden tab is selected.
   const openedTabOption = tabOptions.find((tab) => tab === activeTab);
+
   const getTabIcon = (tab: string) => {
     switch (tab) {
       case 'dice-roller':
@@ -337,9 +387,11 @@ function SectionPanels(props: {
     }
   }, [isPhone]);
 
+  // ── Phone layout ────────────────────────────────────────────────────────────
   if (isPhone) {
     return (
       <Box>
+        {/* Only render the active panel when sections are hidden (i.e. a panel is selected) */}
         {props.hideSections && (
           <BlurBox blur={10} p='sm' mih={props.panelHeight}>
             {activeTab === 'dice-roller' && (
@@ -403,6 +455,7 @@ function SectionPanels(props: {
           </BlurBox>
         )}
 
+        {/* Floating grid button anchored bottom-right that opens the panel picker */}
         <Box style={getAnchorStyles({ r: 20, b: 20 })}>
           <Popover
             position='top'
@@ -411,8 +464,14 @@ function SectionPanels(props: {
             onChange={setOpenedPhonePanel}
             styles={(t) => ({
               dropdown: {
-                backgroundColor: 'rgba(20, 21, 23)',
-                maxWidth: '100dvw',
+                // Force the dropdown to span the full viewport width.
+                // `left: 0 !important` overrides Mantine's floating-ui positioning
+                // which would otherwise anchor it relative to the target button.
+                ...glassStyle(),
+                backgroundColor: 'rgba(0,0,0,0.4)',
+                border: `1px solid ` + IMPRINT_BORDER_COLOR,
+                width: '100dvw',
+                left: '0 !important',
                 borderRadius: t.radius.lg,
                 padding: t.spacing.sm,
               },
@@ -432,6 +491,7 @@ function SectionPanels(props: {
             <Popover.Dropdown>
               <Box>
                 <Stack>
+                  {/* "Health, Attributes, Saves" restores the top stat sections */}
                   <Button
                     leftSection={<IconLayoutList size='1.2rem' stroke={2} />}
                     variant={!props.hideSections ? 'filled' : 'light'}
@@ -557,6 +617,9 @@ function SectionPanels(props: {
       </Box>
     );
   } else {
+    // ── Desktop / tablet layout ────────────────────────────────────────────────
+
+    // Shared fade-in animation applied to each panel on mount
     const panelMotion = {
       initial: { opacity: 0 },
       animate: { opacity: 1 },
@@ -570,12 +633,12 @@ function SectionPanels(props: {
     return (
       <Box>
         <BlurBox
-          blur={10}
           p='sm'
           style={{
             height: props.panelHeight + 65,
           }}
         >
+          {/* keepMounted={false} ensures inactive panels are unmounted to save memory */}
           <Tabs
             color='dark.6'
             variant='pills'
@@ -586,12 +649,13 @@ function SectionPanels(props: {
             activateTabWithKeyboard={false}
           >
             <Tabs.List pb={10} grow>
+              {/* Only render tabs that are in the character's PRIMARY_SHEET_TABS variable */}
               {primarySheetTabs.includes('dice-roller') && (
                 <Tabs.Tab
                   value='dice-roller'
                   style={{
                     border:
-                      activeTab === 'dice-roller' ? `1px solid ` + theme.colors.dark[4] : `1px solid transparent`,
+                      activeTab === 'dice-roller' ? `1px solid ` + IMPRINT_BORDER_COLOR : `1px solid transparent`,
                   }}
                   leftSection={getTabIcon('dice-roller')}
                 >
@@ -603,7 +667,7 @@ function SectionPanels(props: {
                   value='skills-actions'
                   style={{
                     border:
-                      activeTab === 'skills-actions' ? `1px solid ` + theme.colors.dark[4] : `1px solid transparent`,
+                      activeTab === 'skills-actions' ? `1px solid ` + IMPRINT_BORDER_COLOR : `1px solid transparent`,
                   }}
                   leftSection={getTabIcon('skills-actions')}
                 >
@@ -614,7 +678,7 @@ function SectionPanels(props: {
                 <Tabs.Tab
                   value='inventory'
                   style={{
-                    border: activeTab === 'inventory' ? `1px solid ` + theme.colors.dark[4] : `1px solid transparent`,
+                    border: activeTab === 'inventory' ? `1px solid ` + IMPRINT_BORDER_COLOR : `1px solid transparent`,
                   }}
                   leftSection={getTabIcon('inventory')}
                 >
@@ -625,7 +689,7 @@ function SectionPanels(props: {
                 <Tabs.Tab
                   value='spells'
                   style={{
-                    border: activeTab === 'spells' ? `1px solid ` + theme.colors.dark[4] : `1px solid transparent`,
+                    border: activeTab === 'spells' ? `1px solid ` + IMPRINT_BORDER_COLOR : `1px solid transparent`,
                   }}
                   leftSection={getTabIcon('spells')}
                 >
@@ -637,7 +701,7 @@ function SectionPanels(props: {
                   value='feats-features'
                   style={{
                     border:
-                      activeTab === 'feats-features' ? `1px solid ` + theme.colors.dark[4] : `1px solid transparent`,
+                      activeTab === 'feats-features' ? `1px solid ` + IMPRINT_BORDER_COLOR : `1px solid transparent`,
                   }}
                   leftSection={getTabIcon('feats-features')}
                 >
@@ -648,7 +712,7 @@ function SectionPanels(props: {
                 <Tabs.Tab
                   value='companions'
                   style={{
-                    border: activeTab === 'companions' ? `1px solid ` + theme.colors.dark[4] : `1px solid transparent`,
+                    border: activeTab === 'companions' ? `1px solid ` + IMPRINT_BORDER_COLOR : `1px solid transparent`,
                   }}
                   leftSection={getTabIcon('companions')}
                 >
@@ -659,7 +723,7 @@ function SectionPanels(props: {
                 <Tabs.Tab
                   value='details'
                   style={{
-                    border: activeTab === 'details' ? `1px solid ` + theme.colors.dark[4] : `1px solid transparent`,
+                    border: activeTab === 'details' ? `1px solid ` + IMPRINT_BORDER_COLOR : `1px solid transparent`,
                   }}
                   leftSection={getTabIcon('details')}
                 >
@@ -670,13 +734,15 @@ function SectionPanels(props: {
                 <Tabs.Tab
                   value='notes'
                   style={{
-                    border: activeTab === 'notes' ? `1px solid ` + theme.colors.dark[4] : `1px solid transparent`,
+                    border: activeTab === 'notes' ? `1px solid ` + IMPRINT_BORDER_COLOR : `1px solid transparent`,
                   }}
                   leftSection={getTabIcon('notes')}
                 >
                   Notes
                 </Tabs.Tab>
               )}
+
+              {/* Overflow "..." menu for non-primary tabs; highlighted when an overflow tab is active */}
               <Menu shadow='md' width={160} trigger='hover' openDelay={100} closeDelay={100}>
                 <Menu.Target>
                   <ActionIcon
@@ -687,9 +753,9 @@ function SectionPanels(props: {
                     aria-label='Tab Options'
                     ref={tabOptionsRef}
                     style={{
-                      backgroundColor: hoveredTabOptions || openedTabOption ? theme.colors.dark[6] : 'transparent',
+                      backgroundColor: hoveredTabOptions || openedTabOption ? IMPRINT_BG_COLOR : 'transparent',
                       color: openedTabOption ? theme.colors.gray[0] : undefined,
-                      border: openedTabOption ? `1px solid ` + theme.colors.dark[4] : `1px solid transparent`,
+                      border: openedTabOption ? `1px solid ` + IMPRINT_BORDER_COLOR : `1px solid transparent`,
                     }}
                   >
                     <IconDots style={{ width: '70%', height: '70%' }} stroke={1.5} />
@@ -706,7 +772,7 @@ function SectionPanels(props: {
                         setActiveTab(tab);
                       }}
                       style={{
-                        backgroundColor: activeTab === tab ? theme.colors.dark[4] : undefined,
+                        backgroundColor: activeTab === tab ? IMPRINT_BG_COLOR : undefined,
                         color: activeTab === tab ? theme.colors.gray[0] : undefined,
                       }}
                     >
@@ -717,8 +783,13 @@ function SectionPanels(props: {
               </Menu>
             </Tabs.List>
 
+            {/* Each panel is wrapped in AnimatePresence + motion.div for the fade-in transition */}
             <Tabs.Panel value='dice-roller'>
-              <DicePanel panelHeight={props.panelHeight} panelWidth={props.panelWidth} />
+              <AnimatePresence mode='wait'>
+                <motion.div key='dice-roller' {...panelMotion}>
+                  <DicePanel panelHeight={props.panelHeight} panelWidth={props.panelWidth} />
+                </motion.div>
+              </AnimatePresence>
             </Tabs.Panel>
 
             <Tabs.Panel value='skills-actions'>

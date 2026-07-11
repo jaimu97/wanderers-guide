@@ -4,26 +4,29 @@ import { tabletQuery, wideDesktopQuery } from '@utils/mobile-responsive';
 import { useMemo } from 'react';
 import { IconShadow } from '@tabler/icons-react';
 import { cloneDeep } from 'lodash-es';
-import { useRecoilState } from 'recoil';
+import { useAtom } from 'jotai';
 import { characterState } from '@atoms/characterAtoms';
-import { AbilityBlock, ContentPackage } from '@typing/content';
+import { AbilityBlock, ContentPackage } from '@schemas/content';
 import { ModeSelectionOption } from '@common/select/SelectContent';
 import { drawerState } from '@atoms/navAtoms';
 import { getVariable, setVariable } from '@variables/variable-manager';
-import { VariableListStr } from '@typing/variables';
+import { VariableListStr } from '@schemas/variables';
 import { labelToVariable } from '@variables/variable-utils';
+import { useSwipeGesture } from '@utils/use-swipe-gesture';
 
 export default function ModesDrawer(props: { opened: boolean; onClose: () => void; content: ContentPackage }) {
   const theme = useMantineTheme();
   const isTablet = useMediaQuery(tabletQuery());
   const isWideDesktop = useMediaQuery(wideDesktopQuery());
-  const [character, setCharacter] = useRecoilState(characterState);
-  const [_drawer, openDrawer] = useRecoilState(drawerState);
+  const [character, setCharacter] = useAtom(characterState);
+  const [_drawer, openDrawer] = useAtom(drawerState);
 
   const modes = useMemo(() => {
     const givenModeIds = getVariable<VariableListStr>('CHARACTER', 'MODE_IDS')?.value || [];
     return props.content.abilityBlocks.filter((block) => block.type === 'mode' && givenModeIds.includes(block.id + ''));
   }, [props.content]);
+
+  const swipeHandlers = useSwipeGesture({ onSwipeLeft: props.onClose });
 
   const hasModeActive = (mode: AbilityBlock) => {
     const modeName = labelToVariable(mode.name);
@@ -59,6 +62,7 @@ export default function ModesDrawer(props: { opened: boolean; onClose: () => voi
         }}
         transitionProps={{ duration: 200 }}
       >
+        <Box onTouchStart={swipeHandlers.onTouchStart} onTouchEnd={swipeHandlers.onTouchEnd} style={{ height: '100%' }}>
         <Stack justify='space-between' h='100%'>
           <Box>
             <Divider color='dark.6' />
@@ -103,6 +107,7 @@ export default function ModesDrawer(props: { opened: boolean; onClose: () => voi
             ))}
           </Box>
         </Stack>
+        </Box>
       </Drawer>
     </>
   );

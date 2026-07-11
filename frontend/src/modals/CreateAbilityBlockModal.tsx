@@ -32,8 +32,8 @@ import { useForm } from '@mantine/form';
 import { useDisclosure } from '@mantine/hooks';
 import { useQuery } from '@tanstack/react-query';
 import { JSONContent } from '@tiptap/react';
-import { AbilityBlock, AbilityBlockType, ActionCost, Availability, Rarity, Trait } from '@typing/content';
-import { Operation } from '@typing/operations';
+import { AbilityBlock, AbilityBlockType, ActionCost, Availability, Rarity, Trait } from '@schemas/content';
+import { Operation } from '@schemas/operations';
 import { toLabel } from '@utils/strings';
 import useRefresh from '@utils/use-refresh';
 import { useState } from 'react';
@@ -73,7 +73,7 @@ export function CreateAbilityBlockModal(props: {
     queryKey: [`get-ability-block-${props.editId}`, { editId: props.editId, editAbilityBlock: props.editAbilityBlock }],
     queryFn: async ({ queryKey }) => {
       // @ts-ignore
-      // eslint-disable-next-line
+       
       const [_key, { editId, editAbilityBlock }] = queryKey as [
         string,
         { editId: number | undefined; editAbilityBlock: AbilityBlock | undefined },
@@ -91,7 +91,7 @@ export function CreateAbilityBlockModal(props: {
         level: `${abilityBlock.level}`,
       });
       form.reset();
-      setTraits(await fetchTraits(abilityBlock.traits));
+      setTraits(await fetchTraits(abilityBlock.traits ?? undefined));
       setMetaData(abilityBlock.meta_data ?? {});
       refreshDisplayDescription();
 
@@ -109,14 +109,14 @@ export function CreateAbilityBlockModal(props: {
     initialValues: {
       id: -1,
       created_at: '',
-      operations: [] as Operation[] | undefined,
+      operations: [] as Operation[] | null,
       name: '',
       actions: null as ActionCost,
-      level: undefined as number | undefined,
+      level: null as number | null,
       rarity: 'COMMON' as Rarity,
       availability: undefined as Availability | undefined,
       prerequisites: [] as string[],
-      frequency: '' as string | undefined,
+      frequency: '' as string | null,
       cost: '',
       trigger: '',
       requirements: '',
@@ -287,7 +287,7 @@ export function CreateAbilityBlockModal(props: {
               labelPosition='left'
               onClick={toggleAdditional}
             />
-            <Collapse in={openedAdditional}>
+            <Collapse expanded={openedAdditional}>
               <Stack gap={10}>
                 <Textarea label='Frequency' minRows={1} maxRows={4} autosize {...form.getInputProps('frequency')} />
 
@@ -400,7 +400,7 @@ export function CreateAbilityBlockModal(props: {
               my='xs'
               label={
                 <Group gap={3} wrap='nowrap'>
-                  <Button variant={openedOperations ? 'light' : 'subtle'} size='compact-sm' color='gray.6'>
+                  <Button variant={openedOperations ? 'filled' : 'subtle'} size='compact-sm' color='gray'>
                     Operations
                   </Button>
                   {form.values.operations && form.values.operations.length > 0 && (
@@ -413,7 +413,7 @@ export function CreateAbilityBlockModal(props: {
               labelPosition='left'
               onClick={toggleOperations}
             />
-            <Collapse in={openedOperations}>
+            <Collapse expanded={openedOperations}>
               <Stack gap={10}>
                 <OperationSection
                   title={
@@ -442,7 +442,7 @@ export function CreateAbilityBlockModal(props: {
                       </HoverCard.Dropdown>
                     </HoverCard>
                   }
-                  operations={form.values.operations}
+                  operations={form.values.operations ?? undefined}
                   onChange={(operations) => form.setValues({ ...form.values, operations })}
                 />
                 <Divider />

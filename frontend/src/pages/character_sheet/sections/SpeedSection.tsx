@@ -3,21 +3,22 @@ import PerceptionIcon from '@assets/images/PerceptionIcon';
 import SpeedIcon from '@assets/images/SpeedIcon';
 import { drawerState } from '@atoms/navAtoms';
 import BlurBox from '@common/BlurBox';
-import { ICON_BG_COLOR_HOVER, ICON_BG_COLOR } from '@constants/data';
+import { IMPRINT_BG_COLOR_HOVER_2, IMPRINT_BG_COLOR_2 } from '@constants/data';
 import { useMantineTheme, Group, Stack, Box, Text } from '@mantine/core';
 import { useHover } from '@mantine/hooks';
-import { LivingEntity } from '@typing/content';
-import { StoreID } from '@typing/variables';
+import { LivingEntity } from '@schemas/content';
+import { StoreID } from '@schemas/variables';
 import { displayPrimaryVisionSense } from '@utils/senses';
 import { displayFinalProfValue, displayFinalSpeedValue } from '@variables/variable-display';
-import { SetterOrUpdater, useRecoilState } from 'recoil';
+import { useAtom } from 'jotai';
+import { SetterOrUpdater } from '@utils/type-fixing';
 import { ConditionSection } from './ConditionSection';
 import { getAllSpeedVariables } from '@variables/variable-manager';
 import { getSpeedValue } from '@variables/variable-helpers';
 
 function PerceptionSection(props: { id: StoreID }) {
   const { hovered: perceptionHovered, ref: perceptionRef } = useHover();
-  const [_drawer, openDrawer] = useRecoilState(drawerState);
+  const [_drawer, openDrawer] = useAtom(drawerState);
 
   return (
     <Box
@@ -39,7 +40,7 @@ function PerceptionSection(props: { id: StoreID }) {
           transform: 'translate(-50%, -50%)',
         }}
       >
-        <PerceptionIcon size={80} color={perceptionHovered ? ICON_BG_COLOR_HOVER : ICON_BG_COLOR} />
+        <PerceptionIcon size={80} color={perceptionHovered ? IMPRINT_BG_COLOR_HOVER_2 : IMPRINT_BG_COLOR_2} />
       </Box>
       <Stack gap={10}>
         <Text ta='center' fz='sm' fw={500} c='gray.0'>
@@ -48,7 +49,7 @@ function PerceptionSection(props: { id: StoreID }) {
         <Text ta='center' fz='lg' c='gray.0' fw={500} lh='1.5em'>
           {displayFinalProfValue(props.id, 'PERCEPTION')}
         </Text>
-        <Text fz={10} c='gray.5' ta='center' truncate>
+        <Text fz={10} c='gray.2' ta='center' truncate>
           {displayPrimaryVisionSense(props.id)}
         </Text>
       </Stack>
@@ -58,7 +59,7 @@ function PerceptionSection(props: { id: StoreID }) {
 
 function SpeedSection(props: { id: StoreID; entity: LivingEntity | null }) {
   const { hovered: speedHovered, ref: speedRef } = useHover();
-  const [_drawer, openDrawer] = useRecoilState(drawerState);
+  const [_drawer, openDrawer] = useAtom(drawerState);
 
   const allSpeeds = getAllSpeedVariables(props.id).map((speed) => {
     const speedData = getSpeedValue(props.id, speed, props.entity);
@@ -96,7 +97,7 @@ function SpeedSection(props: { id: StoreID; entity: LivingEntity | null }) {
           transform: 'translate(-50%, -50%)',
         }}
       >
-        <SpeedIcon size={75} color={speedHovered ? ICON_BG_COLOR_HOVER : ICON_BG_COLOR} />
+        <SpeedIcon size={75} color={speedHovered ? IMPRINT_BG_COLOR_HOVER_2 : IMPRINT_BG_COLOR_2} />
       </Box>
       <Stack gap={10}>
         <Text ta='center' fz='sm' fw={500} c='gray.0'>
@@ -104,13 +105,13 @@ function SpeedSection(props: { id: StoreID; entity: LivingEntity | null }) {
         </Text>
         <Text ta='center' fz='lg' c='gray.0' fw={500} lh='1.5em' pl={15}>
           {displayFinalSpeedValue(props.id, displaySpeed?.name || 'SPEED', props.entity)}
-          <Text fz='xs' c='gray.3' span>
+          <Text fz='xs' c='gray.2' span>
             {' '}
             ft.
           </Text>
         </Text>
         {hasOthers.length > 1 ? (
-          <Text fz={10} c='gray.5' ta='center'>
+          <Text fz={10} c='gray.2' ta='center'>
             And Others
           </Text>
         ) : (
@@ -123,7 +124,7 @@ function SpeedSection(props: { id: StoreID; entity: LivingEntity | null }) {
 
 function ClassDcSection(props: { id: StoreID }) {
   const { hovered: classDcHovered, ref: classDcRef } = useHover();
-  const [_drawer, openDrawer] = useRecoilState(drawerState);
+  const [_drawer, openDrawer] = useAtom(drawerState);
 
   return (
     <Box
@@ -145,7 +146,7 @@ function ClassDcSection(props: { id: StoreID }) {
           transform: 'translate(-50%, -50%)',
         }}
       >
-        <BoxIcon size={50} color={classDcHovered ? ICON_BG_COLOR_HOVER : ICON_BG_COLOR} />
+        <BoxIcon size={50} color={classDcHovered ? IMPRINT_BG_COLOR_HOVER_2 : IMPRINT_BG_COLOR_2} />
       </Box>
       <Stack gap={10}>
         <Text ta='center' fz='sm' fw={500} c='gray.0'>
@@ -167,7 +168,7 @@ export default function MainSpeedSection(props: {
   const theme = useMantineTheme();
 
   return (
-    <BlurBox blur={10}>
+    <BlurBox>
       <Box
         pt='xs'
         pb={5}
@@ -197,7 +198,7 @@ export function AltSpeedSection(props: {
   const theme = useMantineTheme();
 
   return (
-    <BlurBox blur={10}>
+    <BlurBox>
       <Box
         pt='xs'
         pb={5}

@@ -17,15 +17,16 @@ import { IconChevronRight, IconExternalLink } from '@tabler/icons-react';
 import classes from '@css/LinksGroup.module.css';
 import switchClasses from '@css/CustomSwitch.module.css';
 import { drawerState } from '@atoms/navAtoms';
-import { useRecoilState } from 'recoil';
+import { useAtom } from 'jotai';
 import { useMediaQuery } from '@mantine/hooks';
 import { phoneQuery } from '@utils/mobile-responsive';
+import { IMPRINT_BG_COLOR } from '@constants/data';
 
 interface LinksGroupProps {
   icon: React.FC<any>;
   label: string;
   initiallyOpened?: boolean;
-  links?: { label: string; id: number; url: string; enabled?: boolean }[];
+  links?: { label: string; id: number; url: string | null; enabled?: boolean }[];
   onLinkChange?: (id: number, enabled: boolean) => void;
   onEnableAll?: () => void;
 }
@@ -66,10 +67,10 @@ export function LinksGroup({ icon: Icon, label, initiallyOpened, links, onLinkCh
             </ThemeIcon>
             <Box ml='md'>{label}</Box>
             <Badge ml='md' variant='default'>
-              <Text fz='sm' c='gray.5' span>
+              <Text fz='xs' c='gray.2' span>
                 {links?.filter((link) => link.enabled).length}
               </Text>
-              <Text fz='sm' c='gray.5' span>
+              <Text fz='xs' c='gray.2' span>
                 /{links?.length}
               </Text>
             </Badge>
@@ -88,7 +89,7 @@ export function LinksGroup({ icon: Icon, label, initiallyOpened, links, onLinkCh
         </Group>
       </UnstyledButton>
       {hasLinks && (
-        <Collapse in={opened}>
+        <Collapse expanded={opened}>
           <Box style={{ position: 'relative' }}>
             {items.length > 0 ? (
               <>
@@ -120,12 +121,12 @@ export function LinksGroup({ icon: Icon, label, initiallyOpened, links, onLinkCh
 export function GroupLinkSwitch(props: {
   label: string;
   id: number;
-  url: string;
+  url: string | null;
   enabled?: boolean | undefined;
   linkCss?: boolean;
   onLinkChange?: (id: number, enabled: boolean) => void;
 }) {
-  const [_drawer, openDrawer] = useRecoilState(drawerState);
+  const [_drawer, openDrawer] = useAtom(drawerState);
 
   return (
     <Group gap={0} wrap='nowrap'>
@@ -175,7 +176,7 @@ export function LinkSwitch(props: {
   enabled?: boolean;
   onLinkChange: (enabled: boolean) => void;
 }) {
-  const [_drawer, openDrawer] = useRecoilState(drawerState);
+  const [_drawer, openDrawer] = useAtom(drawerState);
 
   return (
     <Group gap={0} wrap='nowrap'>

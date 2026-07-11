@@ -13,6 +13,7 @@ import {
   ActionIcon,
 } from '@mantine/core';
 import { setPageTitle } from '@utils/document-change';
+import { glassStyle } from '@utils/colors';
 import BlurBox from '@common/BlurBox';
 import { getHomeBackgroundImage } from '@utils/background-images';
 import { IconBrush, IconExternalLink } from '@tabler/icons-react';
@@ -47,9 +48,7 @@ export function Component() {
               radius='lg'
               mt={20}
               style={{
-                backgroundColor: theme.colors.dark[7] + 'D3',
-                backdropFilter: `blur(8px)`,
-                WebkitBackdropFilter: 'blur(8px)',
+                ...glassStyle({ bg: true }),
               }}
             >
               Start your Adventure
@@ -79,7 +78,7 @@ export function Component() {
           />
           <UnderSection
             title='Paizo Inc.'
-            description='The creators of Pathfinder and Starfinder. Please support them by purchasing your own hardcover rulebooks.'
+            description='The creators of Pathfinder and Starfinder. Please support them by purchasing your own rulebooks.'
             iconSize={50}
             url='https://paizo.com/'
             iconURL='https://i.imgur.com/H0eCdBX.png'
@@ -140,7 +139,7 @@ function UnderSection(props: { title: string; description: string; url: string; 
           onClick={() => window.open(props.url, '_blank')}
         />
         <Stack gap={5}>
-          <Anchor ta='center' c='gray.2' fz='lg' fw={500} target='_blank' href={props.url}>
+          <Anchor ta='center' c='gray.0' fz='lg' fw={500} target='_blank' href={props.url}>
             <span style={{ position: 'relative' }}>
               {props.title}
               <ActionIcon

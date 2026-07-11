@@ -26,6 +26,8 @@ import {
   Text,
   ThemeIcon,
   Title,
+  useMantineColorScheme,
+  useMantineTheme,
 } from '@mantine/core';
 import { useInterval } from '@mantine/hooks';
 import { hideNotification, showNotification } from '@mantine/notifications';
@@ -35,6 +37,7 @@ import {
   IconCheck,
   IconChevronDown,
   IconChevronRight,
+  IconClipboard,
   IconCloudUp,
   IconDatabase,
   IconInfoCircle,
@@ -42,10 +45,10 @@ import {
   IconUpload,
   IconZoomPan,
 } from '@tabler/icons-react';
-import { ContentType } from '@typing/content';
+import { ContentType } from '@schemas/content';
 import { displayError } from '@utils/notifications';
 import { useEffect, useRef, useState } from 'react';
-import { useRecoilState } from 'recoil';
+import { useAtom } from 'jotai';
 
 const LOG_CONFIG: Record<string, { color: string; icon: React.FC<any>; label: string }> = {
   thought: { color: 'indigo', icon: IconBrain, label: 'Thought' },
@@ -65,6 +68,8 @@ function LogEntry({
   onOpenCreatureDrawer: (data: any) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const theme = useMantineTheme();
+  const { colorScheme } = useMantineColorScheme();
   const config = LOG_CONFIG[entry.type] ?? LOG_CONFIG.info;
   const Icon = config.icon;
 
@@ -139,7 +144,7 @@ function LogEntry({
           )}
 
           {entry.detail && (
-            <Collapse in={open}>
+            <Collapse expanded={open}>
               <Code
                 block
                 mt={2}
@@ -147,7 +152,7 @@ function LogEntry({
                   fontSize: '0.7rem',
                   maxHeight: 240,
                   overflow: 'auto',
-                  backgroundColor: 'rgba(0,0,0,0.3)',
+                  backgroundColor: colorScheme === 'dark' ? theme.colors.dark[7] : theme.colors.gray[1],
                 }}
               >
                 {entry.detail}
@@ -199,8 +204,8 @@ export function CleaningLogPanel({
   inputData?: { type: ContentType; content: Record<string, any> } | null;
   onUpdated?: () => void;
 }) {
-  const [_drawer, openDrawer] = useRecoilState(drawerState);
-  const [_creatureDrawer, openCreatureDrawer] = useRecoilState(creatureDrawerState);
+  const [_drawer, openDrawer] = useAtom(drawerState);
+  const [_creatureDrawer, openCreatureDrawer] = useAtom(creatureDrawerState);
 
   const [logs, setLogs] = useState<CleaningLog[]>([]);
   const [status, setStatus] = useState<CleaningStatus>('running');
@@ -322,6 +327,13 @@ export function CleaningLogPanel({
         <>
           <Divider color='gray.6' mt='md' mb='sm' label='Fixed Result' labelPosition='center' />
           <Group justify='center'>
+            <BlurButton
+              size='md'
+              leftSection={<IconClipboard size='0.9rem' />}
+              onClick={() => navigator.clipboard.writeText(JSON.stringify(result.content, null, 2))}
+            >
+              Copy JSON
+            </BlurButton>
             <BlurButton
               size='md'
               leftSection={<IconZoomPan size='0.9rem' />}

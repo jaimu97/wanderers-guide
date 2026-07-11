@@ -1,4 +1,14 @@
 import Color from 'colorjs.io';
+
+
+export function glassStyle(options?: { bg?: boolean; border?: boolean }) {
+  return {
+    backdropFilter: 'blur(16px) saturate(180%)',
+    WebkitBackdropFilter: 'blur(16px) saturate(180%)',
+    ...(options?.bg ? { backgroundColor: 'var(--glass-bg-color)' } : {}),
+    ...(options?.border ? { border: '1px solid var(--glass-border-color)', borderRadius: '12px' } : {}),
+  };
+}
 // import tinycolor from 'tinycolor2';
 
 export function interpolateHealth(percentage: number) {
@@ -10,23 +20,3 @@ export function interpolateHealth(percentage: number) {
   });
   return redgreen(1 - percentage).toString();
 }
-
-// export function getShadesFromColor(color: string) {
-//   let lightShades = [];
-//   let darkShades = [];
-
-//   for (let i = 0; i < 3; i++) {
-//     let shade = tinycolor(color)
-//       .lighten(i * 3)
-//       .toString();
-//     lightShades.push(shade);
-//   }
-//   for (let i = 0; i < 7; i++) {
-//     let shade = tinycolor(color)
-//       .darken(i * 3)
-//       .toString();
-//     darkShades.push(shade);
-//   }
-
-//   return [...lightShades, color, ...darkShades];
-// }

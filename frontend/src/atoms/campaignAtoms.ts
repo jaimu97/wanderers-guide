@@ -1,14 +1,7 @@
-import { CampaignNPC, CampaignSessionIdea } from '@typing/content';
-import { atom } from 'recoil';
+import { CampaignNPC, CampaignSessionIdea } from '@schemas/content';
+import { atom } from 'jotai';
 
-const sessionIdeasState = atom({
-  key: 'campaign-ideas',
-  default: [] as CampaignSessionIdea[],
-});
-
-const npcsState = atom({
-  key: 'campaign-npcs',
-  default: [] as CampaignNPC[],
-});
+const sessionIdeasState = atom([] as CampaignSessionIdea[]);
+const npcsState = atom([] as CampaignNPC[]);
 
 export { sessionIdeasState, npcsState };

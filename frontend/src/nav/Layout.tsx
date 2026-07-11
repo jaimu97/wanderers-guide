@@ -1,4 +1,5 @@
 import { sessionState } from '@atoms/supabaseAtoms';
+import { glassStyle } from '@utils/colors';
 import classes from '@css/Layout.module.css';
 import {
   AppShell,
@@ -18,7 +19,9 @@ import {
 import { useDisclosure, useMediaQuery, useViewportSize } from '@mantine/hooks';
 import {
   IconAsset,
+  IconBook,
   IconChevronDown,
+  IconCode,
   IconFlag,
   IconLayersIntersect,
   IconLogout,
@@ -28,27 +31,27 @@ import {
 } from '@tabler/icons-react';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useRecoilValue } from 'recoil';
+import { useAtomValue } from 'jotai';
 import { supabase } from '../main';
 import { LoginButton } from './LoginButton';
 import { SearchBar } from './Searchbar';
 import WanderersGuideLogo from './WanderersGuideLogo';
 import { getCachedPublicUser, getPublicUser } from '@auth/user-manager';
-import { PublicUser } from '@typing/content';
+import { PublicUser } from '@schemas/content';
 import { useQueryClient } from '@tanstack/react-query';
 import { isTouchDevice, phoneQuery, tabletQuery } from '@utils/mobile-responsive';
-import { DISCORD_URL, LEGACY_URL, PATREON_URL } from '@constants/urls';
+import { DISCORD_URL, DOCS_URL, LEGACY_URL, PATREON_URL } from '@constants/urls';
 
 export default function Layout(props: { children: React.ReactNode }) {
   const theme = useMantineTheme();
   const isMobileTouch = useMediaQuery(tabletQuery()) && isTouchDevice();
   const [opened, { toggle, close }] = useDisclosure();
   const navigate = useNavigate();
-  const session = useRecoilValue(sessionState);
+  const session = useAtomValue(sessionState);
   const queryClient = useQueryClient();
 
   const [user, setUser] = useState<PublicUser | null>(getCachedPublicUser());
-  //const [userIcon, setUserIcon] = useRecoilState(userIconState);
+  //const [userIcon, setUserIcon] = useAtom(userIconState);
   const [userMenuOpened, setUserMenuOpened] = useState(false);
 
   const { width } = useViewportSize();
@@ -84,12 +87,8 @@ export default function Layout(props: { children: React.ReactNode }) {
         h={50}
         zIndex={98}
         style={{
-          border: `0px solid`,
+          ...glassStyle({ bg: true }),
           borderRadius: 0,
-          backdropFilter: 'blur(8px)',
-          WebkitBackdropFilter: 'blur(8px)',
-          // Add alpha channel to hex color (browser support: https://caniuse.com/css-rrggbbaa)
-          backgroundColor: theme.colors.dark[8] + 'CC',
         }}
       >
         <Group h='100%' px='md' wrap='nowrap'>
@@ -161,7 +160,7 @@ export default function Layout(props: { children: React.ReactNode }) {
                           borderBottomLeftRadius: theme.radius.xl,
                           borderTopRightRadius: theme.radius.md,
                           borderBottomRightRadius: theme.radius.md,
-                          backgroundColor: userMenuOpened ? '#14151750' : undefined,
+                          backgroundColor: userMenuOpened ? 'var(--mantine-color-default-hover)' : undefined,
                         }}
                       >
                         <Group gap={7} wrap='nowrap' justify='space-between'>
@@ -180,7 +179,7 @@ export default function Layout(props: { children: React.ReactNode }) {
                               radius='xl'
                               size={30}
                             />
-                            <Text fw={500} size='sm' c='gray.4' lh={1} mr={3} truncate>
+                            <Text fw={500} size='sm' c='dimmed' lh={1} mr={3} truncate>
                               {user?.display_name || 'Account'}
                             </Text>
                           </Group>
@@ -278,6 +277,17 @@ export default function Layout(props: { children: React.ReactNode }) {
                         </Menu.Item>
                       )}
 
+                      <Menu.Label>Reference</Menu.Label>
+                      <Menu.Item
+                        leftSection={<IconCode style={{ width: rem(16), height: rem(16) }} stroke={1.5} />}
+                        component='a'
+                        href={DOCS_URL}
+                        target='_blank'
+                        rel='noopener noreferrer'
+                      >
+                        Docs & API
+                      </Menu.Item>
+
                       <Menu.Label>Settings</Menu.Label>
                       <Menu.Item
                         leftSection={<IconSettings style={{ width: rem(16), height: rem(16) }} stroke={1.5} />}
@@ -313,12 +323,9 @@ export default function Layout(props: { children: React.ReactNode }) {
         py='md'
         px={4}
         style={{
-          border: `0px solid`,
+          ...glassStyle(),
           borderRadius: 0,
-          backdropFilter: 'blur(8px)',
-          WebkitBackdropFilter: 'blur(8px)',
-          // Add alpha channel to hex color (browser support: https://caniuse.com/css-rrggbbaa)
-          backgroundColor: theme.colors.dark[8] + 'CC',
+          backgroundColor: 'color-mix(in srgb, var(--mantine-color-body) 80%, transparent)',
         }}
       >
         {session ? (
@@ -387,6 +394,16 @@ export default function Layout(props: { children: React.ReactNode }) {
                 Admin Panel
               </UnstyledButton>
             )}
+            <UnstyledButton
+              className={classes.control}
+              component='a'
+              href={DOCS_URL}
+              target='_blank'
+              rel='noopener noreferrer'
+              onClick={() => close()}
+            >
+              Docs & API
+            </UnstyledButton>
             <Divider />
             <UnstyledButton
               className={classes.control}

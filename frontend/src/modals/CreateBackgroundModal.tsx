@@ -26,8 +26,8 @@ import { useForm } from '@mantine/form';
 import { useDisclosure } from '@mantine/hooks';
 import { useQuery } from '@tanstack/react-query';
 import { JSONContent } from '@tiptap/react';
-import { Background, Rarity } from '@typing/content';
-import { Operation } from '@typing/operations';
+import { Background, Rarity } from '@schemas/content';
+import { Operation } from '@schemas/operations';
 import { isValidImage } from '@utils/images';
 import useRefresh from '@utils/use-refresh';
 import { useState } from 'react';
@@ -47,7 +47,7 @@ export function CreateBackgroundModal(props: {
     queryKey: [`get-background-${props.editId}`, { editId: props.editId }],
     queryFn: async ({ queryKey }) => {
       // @ts-ignore
-      // eslint-disable-next-line
+       
       const [_key, { editId }] = queryKey;
 
       const background = await fetchContentById<Background>('background', editId);
@@ -76,8 +76,9 @@ export function CreateBackgroundModal(props: {
       name: '',
       rarity: 'COMMON' as Rarity,
       description: '',
-      operations: [] as Operation[] | undefined,
+      operations: [] as Operation[] | null,
       artwork_url: '',
+      deprecated: false,
       content_source_id: -1,
       version: '1.0',
     },
@@ -173,7 +174,7 @@ export function CreateBackgroundModal(props: {
               my='xs'
               label={
                 <Group gap={3} wrap='nowrap'>
-                  <Button variant={openedOperations ? 'light' : 'subtle'} size='compact-sm' color='gray.6'>
+                  <Button variant={openedOperations ? 'filled' : 'subtle'} size='compact-sm' color='gray'>
                     Operations
                   </Button>
                   {form.values.operations && form.values.operations.length > 0 && (
@@ -186,7 +187,7 @@ export function CreateBackgroundModal(props: {
               labelPosition='left'
               onClick={toggleOperations}
             />
-            <Collapse in={openedOperations}>
+            <Collapse expanded={openedOperations}>
               <Stack gap={10}>
                 <OperationSection
                   title={
@@ -215,7 +216,7 @@ export function CreateBackgroundModal(props: {
                       </HoverCard.Dropdown>
                     </HoverCard>
                   }
-                  operations={form.values.operations}
+                  operations={form.values.operations ?? undefined}
                   onChange={(operations) => form.setValues({ ...form.values, operations })}
                 />
                 <Divider />

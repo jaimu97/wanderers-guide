@@ -7,10 +7,11 @@ import { interpolateHealth } from '@utils/colors';
 import { getFinalHealthValue } from '@variables/variable-helpers';
 import { evaluate } from 'mathjs';
 import { useNavigate } from 'react-router-dom';
-import { SetterOrUpdater, useRecoilState } from 'recoil';
+import { useAtom } from 'jotai';
+import { SetterOrUpdater } from '@utils/type-fixing';
 import { confirmHealth } from '../entity-handler';
-import { StoreID } from '@typing/variables';
-import { LivingEntity } from '@typing/content';
+import { StoreID } from '@schemas/variables';
+import { LivingEntity } from '@schemas/content';
 
 export default function HealthSection(props: {
   id: StoreID;
@@ -19,7 +20,7 @@ export default function HealthSection(props: {
 }) {
   const theme = useMantineTheme();
 
-  const [_drawer, openDrawer] = useRecoilState(drawerState);
+  const [_drawer, openDrawer] = useAtom(drawerState);
 
   const maxHealth = getFinalHealthValue(props.id);
   let currentHealth = props.entity?.hp_current;
@@ -33,7 +34,7 @@ export default function HealthSection(props: {
   }
 
   return (
-    <BlurBox blur={10}>
+    <BlurBox>
       <Box
         pt='xs'
         pb={5}
@@ -72,7 +73,7 @@ export default function HealthSection(props: {
                 <Box>
                   <Anchor
                     size='lg'
-                    c='gray.3'
+                    c='gray.2'
                     style={{ cursor: 'pointer' }}
                     onClick={() => {
                       openDrawer({

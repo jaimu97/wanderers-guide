@@ -1,5 +1,5 @@
 import { Text, Stack, Button, Group, Loader, Avatar, Modal, Title, Box, useMantineTheme, Anchor } from '@mantine/core';
-import { AbilityBlockType, ContentSource, ContentType, Item } from '@typing/content';
+import { AbilityBlockType, ContentSource, ContentType, Item } from '@schemas/content';
 import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { IconBook2, IconHash } from '@tabler/icons-react';
@@ -31,7 +31,7 @@ import { CreateContentSourceOnlyModal } from './CreateContentSourceModal';
 import { cloneDeep } from 'lodash-es';
 import { CreateClassArchetypeModal } from './CreateClassArchetypeModal';
 import { userState } from '@atoms/userAtoms';
-import { useRecoilValue } from 'recoil';
+import { useAtomValue } from 'jotai';
 import { cleanContent, openCleaningPage } from '@ai/cleaning/cleaning-manager';
 
 export default function ContentFeedbackModal(props: {
@@ -359,7 +359,7 @@ function ContentFeedbackSection(props: {
   const theme = useMantineTheme();
   const contentId = props.data.id;
 
-  const user = useRecoilValue(userState);
+  const user = useAtomValue(userState);
 
   const { data, isFetching } = useQuery({
     queryKey: [`find-content-${props.type}-${contentId}`],

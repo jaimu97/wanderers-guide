@@ -3,12 +3,13 @@ import { convertToContentType, isAbilityBlockType } from '@content/content-utils
 import { ActionIcon, Box, Divider, Drawer, Group, HoverCard, Loader, ScrollArea, Text, Title } from '@mantine/core';
 import { useDidUpdate, useElementSize, useLocalStorage, useMediaQuery } from '@mantine/hooks';
 import { IconArrowLeft, IconHelpTriangleFilled, IconX } from '@tabler/icons-react';
-import { ContentType } from '@typing/content';
+import { ContentType } from '@schemas/content';
 import { Suspense, lazy, useRef } from 'react';
-import { useRecoilState } from 'recoil';
+import { useAtom } from 'jotai';
 import { PrevMetadata } from './drawer-utils';
 import ContentFeedbackModal from '@modals/ContentFeedbackModal';
 import useRefresh from '@utils/use-refresh';
+import { useSwipeGesture } from '@utils/use-swipe-gesture';
 import { modals } from '@mantine/modals';
 import { wideDesktopQuery } from '@utils/mobile-responsive';
 import { cloneDeep } from 'lodash-es';
@@ -62,17 +63,17 @@ export const DRAWER_STYLES = {
 export default function DrawerBase() {
   /* Use this syntax as the standard API for opening drawers:
 
-    const [_drawer, openDrawer] = useRecoilState(drawerState);
+    const [_drawer, openDrawer] = useAtom(drawerState);
     openDrawer({ type: 'feat', data: { id: 1 } });
   */
 
   const isWideDesktop = useMediaQuery(wideDesktopQuery());
 
-  const [_drawer, openDrawer] = useRecoilState(drawerState);
+  const [_drawer, openDrawer] = useAtom(drawerState);
 
   const { ref, height: titleHeight } = useElementSize();
   const [displayTitle, refreshTitle] = useRefresh();
-  const [feedbackData, setFeedbackData] = useRecoilState(feedbackState);
+  const [feedbackData, setFeedbackData] = useAtom(feedbackState);
 
   const viewport = useRef<HTMLDivElement>(null);
   const [value, setValue] = useLocalStorage<PrevMetadata>({
@@ -121,6 +122,8 @@ export default function DrawerBase() {
     refreshTitle();
   }, [_drawer]);
 
+  const swipeHandlers = useSwipeGesture({ onSwipeRight: handleDrawerGoBack });
+
   const opened = !!_drawer;
   return (
     <>
@@ -150,7 +153,7 @@ export default function DrawerBase() {
                   {!!_drawer?.extra?.history?.length ? (
                     <ActionIcon
                       variant='light'
-                      color='gray.4'
+                      color='gray'
                       radius='xl'
                       size='md'
                       onClick={handleDrawerGoBack}
@@ -161,7 +164,7 @@ export default function DrawerBase() {
                   ) : (
                     <ActionIcon
                       variant='light'
-                      color='gray.4'
+                      color='gray'
                       radius='xl'
                       size='md'
                       onClick={handleDrawerClose}
@@ -187,55 +190,57 @@ export default function DrawerBase() {
           overflow: 'hidden',
         }}
       >
-        <ScrollArea viewportRef={viewport} h='100%' pr={16} scrollbars='y'>
-          {opened && (
-            <Suspense fallback={<div></div>}>
-              <DrawerContent
-                onMetadataChange={(openedDict) => {
-                  saveMetadata(openedDict);
-                }}
-              />
-            </Suspense>
-          )}
-        </ScrollArea>
-
-        {_drawer && !NO_FEEDBACK_DRAWERS.includes(_drawer.type) && _drawer.data?.noFeedback !== true && (
-          <>
-            <HoverCard shadow='md' openDelay={500} zIndex={1000} withArrow withinPortal>
-              <HoverCard.Target>
-                <ActionIcon
-                  variant='subtle'
-                  aria-label='Help and Feedback'
-                  radius='xl'
-                  color='dark.3'
-                  style={getAnchorStyles({ r: 5, b: 5 })}
-                  onClick={() => {
-                    const type = isAbilityBlockType(_drawer.type)
-                      ? _drawer.type
-                      : convertToContentType(_drawer.type as ContentType);
-                    const data = cloneDeep(_drawer.data);
-
-                    // Use creature id from .creature to allow edited creatures to get content updates on original
-                    if (type === 'creature' && data.creature?.id) {
-                      data.id = data.creature.id;
-                      data.content_source_id = data.creature.content_source_id;
-                    }
-
-                    setFeedbackData({
-                      type: type,
-                      data: data,
-                    });
+        <Box onTouchStart={swipeHandlers.onTouchStart} onTouchEnd={swipeHandlers.onTouchEnd} style={{ height: '100%' }}>
+          <ScrollArea viewportRef={viewport} h='100%' pr={16} scrollbars='y'>
+            {opened && (
+              <Suspense fallback={<div></div>}>
+                <DrawerContent
+                  onMetadataChange={(openedDict) => {
+                    saveMetadata(openedDict);
                   }}
-                >
-                  <IconHelpTriangleFilled style={{ width: '70%', height: '70%' }} stroke={1.5} />
-                </ActionIcon>
-              </HoverCard.Target>
-              <HoverCard.Dropdown py={0} px={10}>
-                <Text size='sm'>Something wrong?</Text>
-              </HoverCard.Dropdown>
-            </HoverCard>
-          </>
-        )}
+                />
+              </Suspense>
+            )}
+          </ScrollArea>
+
+          {_drawer && !NO_FEEDBACK_DRAWERS.includes(_drawer.type) && _drawer.data?.noFeedback !== true && (
+            <>
+              <HoverCard shadow='md' openDelay={500} zIndex={1000} withArrow withinPortal>
+                <HoverCard.Target>
+                  <ActionIcon
+                    variant='subtle'
+                    aria-label='Help and Feedback'
+                    radius='xl'
+                    color='dark.3'
+                    style={getAnchorStyles({ r: 5, b: 5 })}
+                    onClick={() => {
+                      const type = isAbilityBlockType(_drawer.type)
+                        ? _drawer.type
+                        : convertToContentType(_drawer.type as ContentType);
+                      const data = cloneDeep(_drawer.data);
+
+                      // Use creature id from .creature to allow edited creatures to get content updates on original
+                      if (type === 'creature' && data.creature?.id) {
+                        data.id = data.creature.id;
+                        data.content_source_id = data.creature.content_source_id;
+                      }
+
+                      setFeedbackData({
+                        type: type,
+                        data: data,
+                      });
+                    }}
+                  >
+                    <IconHelpTriangleFilled style={{ width: '70%', height: '70%' }} stroke={1.5} />
+                  </ActionIcon>
+                </HoverCard.Target>
+                <HoverCard.Dropdown py={0} px={10}>
+                  <Text size='sm'>Something wrong?</Text>
+                </HoverCard.Dropdown>
+              </HoverCard>
+            </>
+          )}
+        </Box>
       </Drawer>
       {feedbackData && (
         <ContentFeedbackModal

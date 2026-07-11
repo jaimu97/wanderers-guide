@@ -1,8 +1,8 @@
 import { collectEntitySpellcasting } from '@content/collect-content';
 import { fetchContentById } from '@content/content-store';
 import { getEntityLevel } from '@utils/entity-utils';
-import { Item, LivingEntity, Spell } from '@typing/content';
-import { StoreID } from '@typing/variables';
+import { Item, LivingEntity, Spell } from '@schemas/content';
+import { StoreID } from '@schemas/variables';
 import { hasTraitType } from '@utils/traits';
 import { cloneDeep } from 'lodash-es';
 
@@ -12,7 +12,7 @@ import { cloneDeep } from 'lodash-es';
  * @returns - Whether the spell is a focus spell
  */
 export function isFocusSpell(spell: Spell) {
-  return hasTraitType('FOCUS', spell.traits) || spell.meta_data.focus;
+  return hasTraitType('FOCUS', spell.traits ?? undefined) || spell.meta_data.focus;
 }
 
 /**
@@ -21,7 +21,7 @@ export function isFocusSpell(spell: Spell) {
  * @returns - Whether the spell is a cantrip
  */
 export function isCantrip(spell: Spell) {
-  return hasTraitType('CANTRIP', spell.traits);
+  return hasTraitType('CANTRIP', spell.traits ?? undefined);
 }
 
 /**
@@ -165,7 +165,7 @@ export async function getHeighteningData(spell: Spell, entity?: LivingEntity | n
   const ogSpellRank = getSpellRank(ogSpell);
   const rankDiff = spellRank - ogSpellRank;
 
-  if (spell.heightened && spell.heightened.text.length > 0) {
+  if (spell.heightened && spell.heightened.text && spell.heightened.text.length > 0) {
     for (const h of spell.heightened.text) {
       if (h.amount.startsWith('(+')) {
         const a = parseInt(h.amount.slice(2));

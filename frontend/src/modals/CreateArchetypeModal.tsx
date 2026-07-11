@@ -18,7 +18,7 @@ import {
 import { useForm } from '@mantine/form';
 import { useQuery } from '@tanstack/react-query';
 import { JSONContent } from '@tiptap/react';
-import { AbilityBlock, Archetype, Rarity } from '@typing/content';
+import { AbilityBlock, Archetype, Rarity } from '@schemas/content';
 import { isValidImage } from '@utils/images';
 import { hasTraitType } from '@utils/traits';
 import useRefresh from '@utils/use-refresh';
@@ -37,7 +37,7 @@ export function CreateArchetypeModal(props: {
     queryKey: [`get-archetype-${props.editId}`, { editId: props.editId }],
     queryFn: async ({ queryKey }) => {
       // @ts-ignore
-      // eslint-disable-next-line
+       
       const [_key, { editId }] = queryKey;
 
       const archetype = await fetchContentById<Archetype>('archetype', editId);
@@ -67,8 +67,9 @@ export function CreateArchetypeModal(props: {
       rarity: 'COMMON' as Rarity,
       description: '',
       trait_id: -1,
-      dedication_feat_id: undefined,
+      dedication_feat_id: null as number | null,
       artwork_url: '',
+      deprecated: null as boolean | null,
       content_source_id: -1,
       version: '1.0',
     },
@@ -118,7 +119,7 @@ export function CreateArchetypeModal(props: {
     >
       <ScrollArea h={`calc(min(80dvh, ${EDIT_MODAL_HEIGHT}px))`} pr={14} scrollbars='y'>
         <LoadingOverlay visible={loading || isFetching} />
-        <form onSubmit={form.onSubmit(onSubmit)}>
+        <form onSubmit={form.onSubmit((values) => onSubmit(values))}>
           <Stack gap={10}>
             <Group wrap='nowrap' justify='space-between'>
               <Group wrap='nowrap'>
@@ -170,9 +171,11 @@ export function CreateArchetypeModal(props: {
                 showButton: false,
                 overrideLabel: 'Select a Dedication',
                 abilityBlockType: 'feat',
-                filterFn: (feat) => hasTraitType('DEDICATION', feat.traits) || hasTraitType('DESTINY', feat.traits),
+                filterFn: (feat) =>
+                  hasTraitType('DEDICATION', feat.traits ?? undefined) ||
+                  hasTraitType('DESTINY', feat.traits ?? undefined),
               }}
-              selectedId={form.values.dedication_feat_id}
+              selectedId={form.values.dedication_feat_id ?? undefined}
             />
 
             <Group justify='flex-end'>

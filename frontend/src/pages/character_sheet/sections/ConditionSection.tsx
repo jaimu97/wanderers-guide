@@ -5,17 +5,17 @@ import ConditionPill from '@common/ConditionPill';
 import TokenSelect from '@common/TokenSelect';
 import { selectContent } from '@common/select/SelectContent';
 import { getConditionByName, getAllConditions, compiledConditions } from '@conditions/condition-handler';
-import { ICON_BG_COLOR } from '@constants/data';
-import { getInvBulk, getBulkLimit } from '@items/inv-utils';
+import { IMPRINT_BG_COLOR_2 } from '@constants/data';
 import { useMantineTheme, Group, ActionIcon, ScrollArea, Title, Button, Box, Text, GroupProps } from '@mantine/core';
 import { openContextModal, modals } from '@mantine/modals';
 import { IconPlus, IconJewishStar, IconJewishStarFilled } from '@tabler/icons-react';
-import { Condition, LivingEntity } from '@typing/content';
-import { StoreID } from '@typing/variables';
+import { Condition, LivingEntity } from '@schemas/content';
+import { StoreID } from '@schemas/variables';
 import { isCharacter } from '@utils/type-fixing';
 import { cloneDeep } from 'lodash-es';
 import { useNavigate } from 'react-router-dom';
-import { SetterOrUpdater, useRecoilState } from 'recoil';
+import { useAtom } from 'jotai';
+import { SetterOrUpdater } from '@utils/type-fixing';
 
 export function selectCondition(currentConditions: Condition[], addCondition: (condition: Condition) => void) {
   selectContent(
@@ -134,7 +134,7 @@ export function ConditionPills(props: {
                   ) : (
                     <Button
                       variant='light'
-                      color='gray'
+                      color='dark.4'
                       size='compact-xs'
                       mr={15}
                       onClick={() => {
@@ -221,10 +221,10 @@ export default function MainConditionSection(props: {
   const navigate = useNavigate();
   const theme = useMantineTheme();
 
-  const [_drawer, openDrawer] = useRecoilState(drawerState);
+  const [_drawer, openDrawer] = useAtom(drawerState);
 
   return (
-    <BlurBox blur={10}>
+    <BlurBox>
       <Box
         pt='xs'
         pb={5}
@@ -247,7 +247,7 @@ export default function MainConditionSection(props: {
                 transform: 'translate(-50%, 0px)',
               }}
             >
-              <HeroPointIcon size={75} color={ICON_BG_COLOR} />
+              <HeroPointIcon size={75} color={IMPRINT_BG_COLOR_2} />
             </Box>
             <Group justify='flex-start' style={{ flexDirection: 'column' }} h={100} gap={15}>
               <Text ta='center' fz='md' fw={500} c='gray.0' style={{ whiteSpace: 'nowrap' }}>

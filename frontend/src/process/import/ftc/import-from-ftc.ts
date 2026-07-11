@@ -9,15 +9,15 @@ import {
 } from '@content/content-store';
 import { isItemEquippable, isItemImplantable, isItemInvestable } from '@items/inv-utils';
 import { executeOperations } from '@operations/operations.main';
-import { OperationResult } from '@typing/operations';
+import { OperationResult } from '@schemas/operations';
 import { ObjectWithUUID, convertKeyToBasePrefix, hasOperationSelection } from '@operations/operation-utils';
 import { makeRequest } from '@requests/request-manager';
-import { Character } from '@typing/content';
-import { OperationCharacterResultPackage } from '@typing/operations';
+import { Character, OperationCharacterResultPackage } from '@schemas/content';
 import { selectRandom } from '@utils/random';
 import { isTruthy } from '@utils/type-fixing';
 import { labelToVariable } from '@variables/variable-utils';
 import { cloneDeep } from 'lodash-es';
+import { getAllBackgroundImages } from '@utils/background-images';
 
 /**
  * FTC - Finder 2e Character - A universal file structure for Pathfinder 2e and Starfinder 2e characters.
@@ -154,7 +154,7 @@ export async function importFromFTC(d: FTC) {
             },
           ],
         }
-      : undefined,
+      : null,
     options: {
       is_public: data.options?.public ?? false,
       auto_detect_prerequisites: data.options?.auto_detect_prerequisites ?? false,
@@ -180,7 +180,7 @@ export async function importFromFTC(d: FTC) {
     operation_data: {
       selections: {},
     },
-  } satisfies Character as Character;
+  } as unknown as Character;
 
   // Get the content sources
   const sources = await fetchContentSources('ALL-OFFICIAL-PUBLIC');
@@ -357,6 +357,14 @@ export async function importFromFTC(d: FTC) {
       const charWithInfo = await randomCharacterInfo(character);
       character.details = charWithInfo.details;
     }
+  }
+
+  // Random background image
+  const images = getAllBackgroundImages();
+  const randomImageUrl = images[Math.floor(Math.random() * images.length)]?.url;
+  if (randomImageUrl) {
+    if (!character.details) character.details = {};
+    character.details.background_image_url = randomImageUrl;
   }
 
   // Create the character

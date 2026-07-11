@@ -14,6 +14,7 @@ import {
   SegmentedControl,
   TextInput,
   useMantineTheme,
+  useMantineColorScheme,
   Button,
   LoadingOverlay,
   Select,
@@ -25,6 +26,7 @@ import { useState } from 'react';
 import { DonutChart } from '@mantine/charts';
 import Paginator from '@common/Paginator';
 import { groupBy, map, orderBy } from 'lodash-es';
+import { IMPRINT_BG_COLOR } from '@constants/data';
 
 export function Component(props: {}) {
   setPageTitle(`Content Updates Overview`);
@@ -75,6 +77,7 @@ export function Component(props: {}) {
   });
 
   const theme = useMantineTheme();
+  const { colorScheme } = useMantineColorScheme();
   const [searchQuery, setSearchQuery] = useState('');
   const [searchState, setSearchState] = useState('PENDING');
 
@@ -168,7 +171,7 @@ export function Component(props: {}) {
                 onChange={(event) => setSearchQuery(event.target.value)}
                 styles={{
                   input: {
-                    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+                    backgroundColor: IMPRINT_BG_COLOR,
                     borderColor: searchQuery.trim().length > 0 ? theme.colors['guide'][8] : undefined,
                   },
                 }}

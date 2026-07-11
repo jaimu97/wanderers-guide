@@ -1,9 +1,6 @@
-import { PublicUser } from '@typing/content';
-import { atom } from 'recoil';
+import { PublicUser } from '@schemas/content';
+import { atom } from 'jotai';
 
-const userState = atom({
-  key: 'public-user',
-  default: null as PublicUser | null,
-});
+const userState = atom(null as PublicUser | null);
 
 export { userState };

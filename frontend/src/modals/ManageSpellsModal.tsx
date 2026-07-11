@@ -1,6 +1,6 @@
 import { drawerState } from '@atoms/navAtoms';
 import { SelectContentButton, SpellSelectionOption, selectContent } from '@common/select/SelectContent';
-import { EDIT_MODAL_HEIGHT } from '@constants/data';
+import { EDIT_MODAL_HEIGHT, IMPRINT_BG_COLOR } from '@constants/data';
 import { collectEntitySpellcasting } from '@content/collect-content';
 import { isSpellVisible } from '@content/content-hidden';
 import { fetchContentAll, getDefaultSources } from '@content/content-store';
@@ -18,12 +18,13 @@ import {
   TextInput,
   Title,
   useMantineTheme,
+  useMantineColorScheme,
 } from '@mantine/core';
 import { isCantrip, isNormalSpell, isRitual } from '@spells/spell-utils';
 import { IconPlus, IconSearch } from '@tabler/icons-react';
 import { useQuery } from '@tanstack/react-query';
-import { LivingEntity, Spell, SpellSlot, SpellSlotRecord } from '@typing/content';
-import { StoreID } from '@typing/variables';
+import { LivingEntity, Spell, SpellSlot, SpellSlotRecord } from '@schemas/content';
+import { StoreID } from '@schemas/variables';
 import { rankNumber } from '@utils/numbers';
 import { toLabel } from '@utils/strings';
 import { isTruthy } from '@utils/type-fixing';
@@ -31,7 +32,8 @@ import useRefresh from '@utils/use-refresh';
 import * as JsSearch from 'js-search';
 import { groupBy } from 'lodash-es';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { SetterOrUpdater, useRecoilState } from 'recoil';
+import { useAtom } from 'jotai';
+import { SetterOrUpdater } from '@utils/type-fixing';
 
 export default function ManageSpellsModal(props: {
   id: StoreID;
@@ -52,7 +54,7 @@ export default function ManageSpellsModal(props: {
   const isRituals = props.source === 'RITUALS';
 
   const [searchQuery, setSearchQuery] = useState('');
-  const [_drawer, openDrawer] = useRecoilState(drawerState);
+  const [_drawer, openDrawer] = useAtom(drawerState);
 
   const { data: allRawSpells, isFetching } = useQuery({
     queryKey: [`find-spells-in-manage-spells-modal`, { entityId: props.entity?.id, source: props.source }],
@@ -212,7 +214,7 @@ const SlotsSection = (props: {
   };
 }) => {
   const theme = useMantineTheme();
-  const [_drawer, openDrawer] = useRecoilState(drawerState);
+  const [_drawer, openDrawer] = useAtom(drawerState);
   const [displaySlots, refreshSlots] = useRefresh();
 
   const { slots } = props;
@@ -362,7 +364,8 @@ const ListSection = (props: {
   const isRituals = props.source === 'RITUALS';
 
   const theme = useMantineTheme();
-  const [_drawer, openDrawer] = useRecoilState(drawerState);
+  const { colorScheme } = useMantineColorScheme();
+  const [_drawer, openDrawer] = useAtom(drawerState);
 
   const [rankSelectSpell, setRankSelectSpell] = useState<Spell | null>(null);
 
@@ -414,7 +417,7 @@ const ListSection = (props: {
           onChange={(e) => props.setSearchQuery(e.target.value)}
           styles={{
             input: {
-              backgroundColor: 'rgba(0, 0, 0, 0.3)',
+              backgroundColor: IMPRINT_BG_COLOR,
               borderColor: props.searchQuery.trim().length > 0 ? theme.colors['guide'][8] : undefined,
             },
           }}
@@ -503,7 +506,7 @@ const ListSection = (props: {
             />
           ))}
           {props.spells.length === 0 && (
-            <Text c='gray.6' fz='sm' fs='italic' ta='center' pt={20}>
+            <Text c='gray.3' fz='sm' fs='italic' ta='center' pt={20}>
               No {isRituals ? 'rituals' : 'spells'} found
             </Text>
           )}

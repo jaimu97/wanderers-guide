@@ -1,17 +1,19 @@
 import BlurButton from '@common/BlurButton';
 import { Accordion, Badge, Box, Divider, Group, Paper, Stack, Text } from '@mantine/core';
 import { getSpellStats } from '@spells/spell-handler';
-import { CastingSource, LivingEntity, Spell, SpellInnateEntry, SpellListEntry, SpellSlot } from '@typing/content';
+import { CastingSource, LivingEntity, Spell, SpellInnateEntry, SpellListEntry, SpellSlot } from '@schemas/content';
 import { rankNumber, sign } from '@utils/numbers';
 import { toLabel } from '@utils/strings';
 import { Dictionary } from 'node_modules/cypress/types/lodash';
 import SpellListEntrySection from './SpellListEntrySection';
 import { StatButton } from '@pages/character_builder/CharBuilderCreation';
 import { drawerState } from '@atoms/navAtoms';
-import { SetterOrUpdater, useRecoilState } from 'recoil';
-import { StoreID } from '@typing/variables';
+import { useAtom } from 'jotai';
+import { SetterOrUpdater } from '@utils/type-fixing';
+import { StoreID } from '@schemas/variables';
 import { useMediaQuery } from '@mantine/hooks';
 import { phoneQuery } from '@utils/mobile-responsive';
+import ImprintButton from '@common/ImprintButton';
 
 export default function PreparedSpellsList(props: {
   id: StoreID;
@@ -62,7 +64,7 @@ export default function PreparedSpellsList(props: {
   const isPhone = useMediaQuery(phoneQuery());
 
   const { slots, castSpell } = props;
-  const [_drawer, openDrawer] = useRecoilState(drawerState);
+  const [_drawer, openDrawer] = useAtom(drawerState);
 
   const highestRank = Object.keys(slots || {}).reduce((acc, rank) => (parseInt(rank) > acc ? parseInt(rank) : acc), 0);
   // If there are no spells to display, and there are filters, return null
@@ -76,12 +78,13 @@ export default function PreparedSpellsList(props: {
     <Accordion.Item value={props.index} data-wg-name={props.index.toLowerCase()}>
       <Accordion.Control h={40}>
         <Group wrap='nowrap' justify='space-between' gap={0}>
-          <Text c='gray.5' fw={700} fz='sm'>
+          <Text c='gray.2' fw={700} fz='sm'>
             {toLabel(props.source!.name)} Spells
           </Text>
 
           <Box mr={10}>
-            <BlurButton
+            <ImprintButton
+              radius='xl'
               size='xs'
               fw={500}
               onClick={(e) => {
@@ -99,7 +102,7 @@ export default function PreparedSpellsList(props: {
               }}
             >
               Manage
-            </BlurButton>
+            </ImprintButton>
           </Box>
         </Group>
       </Accordion.Control>
@@ -144,10 +147,10 @@ export default function PreparedSpellsList(props: {
                 }}
               >
                 <Group wrap='nowrap' gap={10}>
-                  <Text fw={600} c='gray.5' fz='sm' span>
+                  <Text fw={600} c='gray.2' fz='sm' span>
                     Spell Attack
                   </Text>
-                  <Text c='gray.5' fz='sm' span>
+                  <Text c='gray.2' fz='sm' span>
                     {sign(spellStats.spell_attack.total[0])}
                     {!isPhone &&
                       ` / ${sign(spellStats.spell_attack.total[1])} /
@@ -165,10 +168,10 @@ export default function PreparedSpellsList(props: {
                 }}
               >
                 <Group wrap='nowrap' gap={10}>
-                  <Text fw={600} c='gray.5' fz='sm' span>
+                  <Text fw={600} c='gray.2' fz='sm' span>
                     Spell DC
                   </Text>
-                  <Text c='gray.5' fz='sm' span>
+                  <Text c='gray.2' fz='sm' span>
                     {spellStats.spell_dc.total}
                   </Text>
                 </Group>
@@ -182,11 +185,11 @@ export default function PreparedSpellsList(props: {
                 .map((rank, index) => (
                   <div key={index} data-wg-name={`rank-group-${index}`}>
                     <Group wrap='nowrap' justify='space-between' gap={0}>
-                      <Text c='gray.5' fw={700} fz='sm'>
+                      <Text c='gray.2' fw={700} fz='sm'>
                         {rank === '0' ? 'Cantrips' : `${rankNumber(parseInt(rank))}`}
                       </Text>
-                      <Badge mr='sm' variant='outline' color='gray.5' size='xs'>
-                        <Text fz='sm' c='gray.5' span>
+                      <Badge mr='sm' variant='outline' color='gray.5' size='sm'>
+                        <Text c='gray.2' span inherit>
                           {props.hasFilters ? slots[rank].filter((s) => s.spell).length : slots[rank].length}
                         </Text>
                       </Badge>

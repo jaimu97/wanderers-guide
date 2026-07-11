@@ -1,19 +1,20 @@
 import { getConditionByName } from '@conditions/condition-handler';
 import { collectEntitySpellcasting, getFocusPoints } from '@content/collect-content';
 import { filterByTraitType } from '@items/inv-utils';
-import { LivingEntity } from '@typing/content';
-import { StoreID, VariableAttr, VariableNum, VariableProf } from '@typing/variables';
+import { LivingEntity } from '@schemas/content';
+import { StoreID, VariableAttr, VariableNum, VariableProf } from '@schemas/variables';
 import { getFinalHealthValue } from '@variables/variable-helpers';
 import { getVariable } from '@variables/variable-manager';
 import { cloneDeep } from 'lodash-es';
 import { evaluate } from 'mathjs';
-import { SetterOrUpdater } from 'recoil';
+import { SetterOrUpdater } from '@utils/type-fixing';
 
 export function confirmHealth(
   hp: string,
   maxHealth: number,
   entity: LivingEntity,
-  setEntity?: SetterOrUpdater<LivingEntity | null>
+  setEntity?: SetterOrUpdater<LivingEntity | null>,
+  keepResetHp?: boolean
 ) {
   let result = -1;
   try {
@@ -60,7 +61,7 @@ export function confirmHealth(
     },
     meta_data: {
       ...c.meta_data,
-      reset_hp: false,
+      reset_hp: keepResetHp ? c.meta_data?.reset_hp : false,
     },
   });
   setEntity?.((c) => {

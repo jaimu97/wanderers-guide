@@ -18,8 +18,8 @@ import {
 import { useForm } from '@mantine/form';
 import { useQuery } from '@tanstack/react-query';
 import { JSONContent } from '@tiptap/react';
-import { AbilityBlock, VersatileHeritage, Rarity } from '@typing/content';
-import { Operation } from '@typing/operations';
+import { AbilityBlock, VersatileHeritage, Rarity } from '@schemas/content';
+import { Operation } from '@schemas/operations';
 import { isValidImage } from '@utils/images';
 import useRefresh from '@utils/use-refresh';
 import { useState } from 'react';
@@ -37,7 +37,7 @@ export function CreateVersatileHeritageModal(props: {
     queryKey: [`get-versatile-heritage-${props.editId}`, { editId: props.editId }],
     queryFn: async ({ queryKey }) => {
       // @ts-ignore
-      // eslint-disable-next-line
+       
       const [_key, { editId }] = queryKey;
 
       const versatileHeritage = await fetchContentById<VersatileHeritage>('versatile-heritage', editId);
@@ -70,6 +70,7 @@ export function CreateVersatileHeritageModal(props: {
       heritage_id: -1,
       artwork_url: '',
       content_source_id: -1,
+      deprecated: null as boolean | null,
       version: '1.0',
     },
 

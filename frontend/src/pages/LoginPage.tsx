@@ -18,7 +18,7 @@ import DicordIcon from '../assets/images/discord-icon.png';
 import GitHubIcon from '../assets/images/github-icon.png';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { sessionState } from '@atoms/supabaseAtoms';
-import { useRecoilState, useRecoilValue } from 'recoil';
+import { useAtom, useAtomValue } from 'jotai';
 import { useEffect, useState } from 'react';
 import { setPageTitle } from '@utils/document-change';
 import { clearUserData } from '@auth/user-manager';
@@ -31,7 +31,7 @@ export function Component() {
 
   const theme = useMantineTheme();
   const navigate = useNavigate();
-  const [session, setSession] = useRecoilState(sessionState);
+  const [session, setSession] = useAtom(sessionState);
 
   const [searchParams] = useSearchParams();
   useEffect(() => {
@@ -109,12 +109,14 @@ export function Component() {
         <Stack gap={10}>
           <Stack gap={0}>
             <TextInput
+              name='email'
               label='Email address'
               placeholder='Your email address'
               value={email}
               onChange={(e) => setEmail(e.currentTarget.value)}
             />
             <PasswordInput
+              name='password'
               label='Password'
               placeholder='Your password'
               value={password}
@@ -127,10 +129,6 @@ export function Component() {
             onClick={async () => {
               if (!email || !password) {
                 setError('Email and password are required.');
-                return;
-              }
-              if (password.length < 8) {
-                setError('Password must be at least 8 characters long.');
                 return;
               }
               if (!email.includes('@')) {
@@ -176,10 +174,10 @@ export function Component() {
               {message}
             </Text>
           )}
-          <Anchor underline='always' onClick={() => changePageType('forgot-password')} c='gray.6' ta='center' size='sm'>
+          <Anchor underline='always' onClick={() => changePageType('forgot-password')} c='dimmed' ta='center' size='sm'>
             Forgot your password?
           </Anchor>
-          <Anchor underline='always' onClick={() => changePageType('register')} c='gray.6' ta='center' size='sm'>
+          <Anchor underline='always' onClick={() => changePageType('register')} c='dimmed' ta='center' size='sm'>
             Don't have an account? Sign up
           </Anchor>
         </Stack>
@@ -193,12 +191,14 @@ export function Component() {
         <Stack gap={10}>
           <Stack gap={0}>
             <TextInput
+              name='email'
               label='Email address'
               placeholder='Your email address'
               value={email}
               onChange={(e) => setEmail(e.currentTarget.value)}
             />
             <PasswordInput
+              name='password'
               label='Password'
               placeholder='Your password'
               value={password}
@@ -271,7 +271,7 @@ export function Component() {
               {message}
             </Text>
           )}
-          <Anchor underline='always' onClick={() => changePageType('signin')} c='gray.6' ta='center' size='sm'>
+          <Anchor underline='always' onClick={() => changePageType('signin')} c='dimmed' ta='center' size='sm'>
             Already have an account? Sign in
           </Anchor>
         </Stack>
@@ -285,6 +285,7 @@ export function Component() {
         <Stack gap={10}>
           <Stack gap={0}>
             <TextInput
+              name='email'
               label='Email address'
               placeholder='Your email address'
               value={email}
@@ -330,7 +331,7 @@ export function Component() {
               {message}
             </Text>
           )}
-          <Anchor underline='always' onClick={() => changePageType('signin')} c='gray.6' ta='center' size='sm'>
+          <Anchor underline='always' onClick={() => changePageType('signin')} c='dimmed' ta='center' size='sm'>
             Know your password? Sign in
           </Anchor>
         </Stack>

@@ -4,13 +4,13 @@ import { Anchor, Blockquote, Code, Divider, List, Table, Text, TextProps, Title,
 import { getContentDataFromHref } from './rich_text_input/ContentLinkExtension';
 import { drawerState } from '@atoms/navAtoms';
 import { convertContentLink } from '@drawers/drawer-utils';
-import { useRecoilState } from 'recoil';
+import { useAtom } from 'jotai';
 import React, { ReactNode, useRef } from 'react';
 import IndentedText from './IndentedText';
 import { IconQuote } from '@tabler/icons-react';
 import { getAllConditions } from '@conditions/condition-handler';
 import { compileExpressions } from '@variables/variable-utils';
-import { StoreID } from '@typing/variables';
+import { StoreID } from '@schemas/variables';
 import { isString } from 'lodash-es';
 
 interface RichTextProps extends TextProps {
@@ -21,7 +21,7 @@ interface RichTextProps extends TextProps {
 
 export default function RichText(props: RichTextProps) {
   const theme = useMantineTheme();
-  const [_drawer, openDrawer] = useRecoilState(drawerState);
+  const [_drawer, openDrawer] = useAtom(drawerState);
 
   const prevProcessedP = useRef<ReactNode | null>(null);
   const inDoubleTiersChain = useRef(false);
@@ -41,8 +41,11 @@ export default function RichText(props: RichTextProps) {
 
   // Convert action symbol text of abbr to code markdown (then convert it back)
   // This is a hack to get around the fact that markdown doesn't really support abbr
-  const regex = /<abbr[^>]*class="action-symbol"[^>]*>(\d+)<\/abbr>/gm;
+  const regex = /<abbr[^>]*class="action-symbol"[^>]*>([A-Z0-9]+)<\/abbr>/gm;
   convertedChildren = convertedChildren?.replace(regex, '`action_symbol_$1`');
+
+  // Add spaces around em dashes between letters
+  convertedChildren = convertedChildren?.replace(/(\w)—(\w)/g, '$1 — $2');
 
   // Convert the string output from editor table format to be read by react-markdown
   convertedChildren = convertedChildren?.replace(/\|\n\n\|/g, '|\n|');
@@ -208,7 +211,7 @@ export default function RichText(props: RichTextProps) {
                 href={drawerData ? undefined : href}
                 target='_blank'
                 underline='always'
-                c='dark.0'
+                c='var(--mantine-text-color)'
                 style={{
                   textDecorationColor: theme.colors['guide'][7],
                 }}
@@ -251,7 +254,17 @@ export default function RichText(props: RichTextProps) {
         blockquote(innerProps) {
           const { children, className } = innerProps;
           return (
-            <Blockquote className={className} icon={<IconQuote size='1.3rem' />} iconSize={40} ml={5} my={10}>
+            <Blockquote
+              className={className}
+              icon={<IconQuote size='1.3rem' />}
+              iconSize={40}
+              ml={5}
+              my={10}
+              styles={{
+                root: { '--bq-bg-dark': 'rgba(222, 226, 230, 0.06)' },
+                icon: { backgroundColor: 'transparent' },
+              }}
+            >
               {children}
             </Blockquote>
           );

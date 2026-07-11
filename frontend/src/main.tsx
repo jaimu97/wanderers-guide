@@ -13,7 +13,6 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { RouterProvider, createBrowserRouter } from 'react-router-dom';
-import { RecoilRoot } from 'recoil';
 import App from './App.tsx';
 import './index.css';
 import { ErrorPage } from './pages/ErrorPage.tsx';
@@ -198,11 +197,9 @@ console.error = function (message, ...args) {
 const root = createRoot(document.getElementById('root') as HTMLElement);
 root.render(
   <StrictMode>
-    <MantineProvider defaultColorScheme='dark'>
+    <MantineProvider forceColorScheme='dark'>
       <QueryClientProvider client={queryClient}>
-        <RecoilRoot>
           <RouterProvider router={router} />
-        </RecoilRoot>
       </QueryClientProvider>
     </MantineProvider>
   </StrictMode>

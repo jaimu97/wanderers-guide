@@ -314,6 +314,26 @@ async function handleAdvancedSearch(
     return data ?? [];
   };
 
+  const searchCreatures = async () => {
+    // Creatures don't carry top-level `description` or `traits` columns
+    // (description lives in `details.description`, traits aren't stored at
+    // all on the row), so applyCommonFilters can't be used wholesale. Apply
+    // only the safe shared filters.
+    let q = client.from('creature').select();
+
+    if (filters.name) q = applySimpleSearch(q, 'name', filters.name);
+    if (filters.rarity) q = q.eq('rarity', filters.rarity);
+    if (filters.content_sources?.length)
+      q = q.in('content_source_id', filters.content_sources);
+    if (filters.level_min !== undefined) q = q.gte('level', filters.level_min);
+    if (filters.level_max !== undefined) q = q.lte('level', filters.level_max);
+
+    q = q.order('level', { ascending: true }).order('name', { ascending: true });
+
+    const { data } = await q;
+    return data ?? [];
+  };
+
   const simpleTableSearch = async (table: TableName) => {
     let q = client.from(table).select();
     q = applyCommonFilters(q);
@@ -344,7 +364,7 @@ async function handleAdvancedSearch(
     } else if (filters.type === 'item') {
       results.items = await searchItems();
     } else if (filters.type === 'creature') {
-      results.creatures = []; // Creature search not implemented yet
+      results.creatures = await searchCreatures();
     } else if (filters.type === 'ancestry') {
       results.ancestries = await simpleTableSearch('ancestry');
     } else if (filters.type === 'archetype') {
@@ -415,15 +435,42 @@ async function handleSimpleSearch(
     };
   }
 
+  // Per-table column projection — the spotlight only renders id/name/description/
+  // level/rank/type/traits, so fetching SELECT * (which includes meta_data,
+  // operations, details, inventory, heightened, etc.) is wasted bandwidth.
+  // Trimming this typically cuts the response payload ~10×.
+  const SEARCH_COLUMNS: Record<TableName, string> = {
+    ability_block: 'id,name,description,level,type,traits,content_source_id',
+    ancestry: 'id,name,description,content_source_id',
+    archetype: 'id,name,description,content_source_id',
+    background: 'id,name,description,content_source_id',
+    class: 'id,name,description,content_source_id',
+    class_archetype: 'id,name,description,content_source_id',
+    creature: 'id,name,level,content_source_id',
+    item: 'id,name,description,level,traits,"group",hands,content_source_id',
+    language: 'id,name,description,content_source_id',
+    spell: 'id,name,description,rank,traits,traditions,content_source_id',
+    trait: 'id,name,description,content_source_id',
+    versatile_heritage: 'id,name,description,content_source_id',
+  };
+
   const searchTable = async function (tableName: TableName, text: string) {
-    let query = client.from(tableName).select();
+    let query = client.from(tableName).select(SEARCH_COLUMNS[tableName]);
     if (content_sources) {
       query = query.in('content_source_id', content_sources);
     }
-    query = query.textSearch('name', text, {
+    // Search the stored generated tsvector column (search_tsv) — backed by a
+    // GIN index per content table (see data/migrations/001_search_indexes.sql).
+    // Includes both name (weight A) and description (weight B), so users find
+    // content by description text too, not just by name.
+    query = query.textSearch('search_tsv', text, {
       type: 'websearch',
       config: 'english',
     });
+    // Cap each table at 20 hits — the spotlight UI only shows the top results
+    // anyway, and pathological queries (e.g. a single common word) shouldn't
+    // pull hundreds of rows per table back over the wire.
+    query = query.limit(20);
     const { data, error } = await query;
     if (error) {
       return [];

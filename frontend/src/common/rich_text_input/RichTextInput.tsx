@@ -1,17 +1,15 @@
 import { RichTextEditor } from '@mantine/tiptap';
 import { Extension, JSONContent, useEditor } from '@tiptap/react';
 import Highlight from '@tiptap/extension-highlight';
-import StarterKit from '@tiptap/starter-kit';
-import Underline from '@tiptap/extension-underline';
 import TextAlign from '@tiptap/extension-text-align';
 import Superscript from '@tiptap/extension-superscript';
 import SubScript from '@tiptap/extension-subscript';
 import Color from '@tiptap/extension-color';
-import TextStyle from '@tiptap/extension-text-style';
+import { TextStyle } from '@tiptap/extension-text-style';
 import { useMantineTheme, Text, Box } from '@mantine/core';
 import { ContentLink } from './ContentLinkExtension';
 import ContentLinkControl from './ContentLinkControl';
-import { useRecoilState } from 'recoil';
+import { useAtom } from 'jotai';
 import { drawerState } from '@atoms/navAtoms';
 import { toMarkdown } from '@content/content-utils';
 import { ActionSymbol } from './ActionSymbolExtension';
@@ -20,26 +18,32 @@ import Placeholder from '@tiptap/extension-placeholder';
 import { useElementSize } from '@mantine/hooks';
 import AutoContentLinkControl from './AutoContentLinkControl';
 import { HighlightColorControl } from './HighlightColorControl';
+import StarterKit from '@tiptap/starter-kit';
+import { Link } from '@mantine/tiptap';
+import { IMPRINT_BG_COLOR, IMPRINT_BG_COLOR_HOVER, IMPRINT_BG_COLOR_HOVER_2 } from '@constants/data';
 
 interface RichTextInputProps {
   label?: string;
   required?: boolean;
-  value?: string | JSONContent;
+  value?: string | JSONContent | null;
   onChange?: (text: string, json: JSONContent) => void;
   placeholder?: string;
   height?: number;
   maxHeight?: number;
   hasColorOptions?: boolean;
+  readOnly?: boolean;
 }
 
 export default function RichTextInput(props: RichTextInputProps) {
   const theme = useMantineTheme();
-  const _drawerState = useRecoilState(drawerState);
+  const _drawerState = useAtom(drawerState);
 
   const editor = useEditor({
+    shouldRerenderOnTransaction: true,
+    editable: !props.readOnly,
     extensions: [
-      StarterKit,
-      Underline,
+      StarterKit.configure({ link: false }),
+      Link,
       ContentLink(_drawerState),
       ActionSymbol,
       Superscript,
@@ -98,65 +102,67 @@ export default function RichTextInput(props: RichTextInputProps) {
         fz='sm'
         styles={{
           toolbar: {
-            backgroundColor: theme.colors.dark[7],
+            backgroundColor: 'rgba(0,0,0,0.05)',
           },
           content: {
-            backgroundColor: theme.colors.dark[6],
+            backgroundColor: IMPRINT_BG_COLOR_HOVER,
             borderTopLeftRadius: 0,
             borderTopRightRadius: 0,
             display: 'flex',
-            '--rich-text-editor-max-height': props.maxHeight ? `${props.maxHeight - 50}px` : undefined,
-            '--rich-text-editor-height': props.height ? `${props.height - 50}px` : undefined,
+            '--rich-text-editor-max-height': props.maxHeight ? `${props.maxHeight - (props.readOnly ? 0 : 50)}px` : undefined,
+            '--rich-text-editor-height': props.height ? `${props.height - (props.readOnly ? 0 : 50)}px` : undefined,
           },
         }}
       >
-        <RichTextEditor.Toolbar
-          style={isSmall ? { gap: 0, justifyContent: 'space-between' } : { gap: 5, flexWrap: 'nowrap' }}
-        >
-          <RichTextEditor.ControlsGroup>
-            <ActionSymbolControl />
-          </RichTextEditor.ControlsGroup>
-
-          <RichTextEditor.ControlsGroup>
-            <ContentLinkControl />
-            <RichTextEditor.Unlink />
-          </RichTextEditor.ControlsGroup>
-
-          <RichTextEditor.ControlsGroup>
-            <RichTextEditor.Bold />
-            <RichTextEditor.Italic />
-            <RichTextEditor.Underline />
-          </RichTextEditor.ControlsGroup>
-
-          <RichTextEditor.ControlsGroup>
-            <RichTextEditor.Blockquote />
-            <RichTextEditor.Hr />
-            <RichTextEditor.BulletList />
-            <RichTextEditor.OrderedList />
-          </RichTextEditor.ControlsGroup>
-
-          {!isVerySmall && (
+        {!props.readOnly && (
+          <RichTextEditor.Toolbar
+            style={isSmall ? { gap: 0, justifyContent: 'space-between' } : { gap: 5, flexWrap: 'nowrap' }}
+          >
             <RichTextEditor.ControlsGroup>
-              {/* <RichTextEditor.H1 /> */}
-              <RichTextEditor.H2 />
-              <RichTextEditor.H3 />
-              <RichTextEditor.H4 />
+              <ActionSymbolControl />
             </RichTextEditor.ControlsGroup>
-          )}
 
-          {!isPrettySmall && props.hasColorOptions && (
             <RichTextEditor.ControlsGroup>
-              <HighlightColorControl colors={defaultColors} />
-              <RichTextEditor.ColorPicker colors={defaultColors} />
+              <ContentLinkControl />
+              <RichTextEditor.Unlink />
             </RichTextEditor.ControlsGroup>
-          )}
 
-          {!isVerySmall && (
             <RichTextEditor.ControlsGroup>
-              <AutoContentLinkControl />
+              <RichTextEditor.Bold />
+              <RichTextEditor.Italic />
+              <RichTextEditor.Underline />
             </RichTextEditor.ControlsGroup>
-          )}
-        </RichTextEditor.Toolbar>
+
+            <RichTextEditor.ControlsGroup>
+              <RichTextEditor.Blockquote />
+              <RichTextEditor.Hr />
+              <RichTextEditor.BulletList />
+              <RichTextEditor.OrderedList />
+            </RichTextEditor.ControlsGroup>
+
+            {!isVerySmall && (
+              <RichTextEditor.ControlsGroup>
+                {/* <RichTextEditor.H1 /> */}
+                <RichTextEditor.H2 />
+                <RichTextEditor.H3 />
+                <RichTextEditor.H4 />
+              </RichTextEditor.ControlsGroup>
+            )}
+
+            {!isPrettySmall && props.hasColorOptions && (
+              <RichTextEditor.ControlsGroup>
+                <HighlightColorControl colors={defaultColors} />
+                <RichTextEditor.ColorPicker colors={defaultColors} />
+              </RichTextEditor.ControlsGroup>
+            )}
+
+            {/* {!isVerySmall && (
+              <RichTextEditor.ControlsGroup>
+                <AutoContentLinkControl />
+              </RichTextEditor.ControlsGroup>
+            )} */}
+          </RichTextEditor.Toolbar>
+        )}
 
         <RichTextEditor.Content />
       </RichTextEditor>

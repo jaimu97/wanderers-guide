@@ -1,8 +1,8 @@
 import { fetchContentAll, getContentFast, getDefaultSources } from '@content/content-store';
 import { isPlayingStarfinder } from '@content/system-handler';
-import { ContentPackage, ContentSource, Inventory, InventoryItem, Item, LivingEntity } from '@typing/content';
-import { Operation } from '@typing/operations';
-import { StoreID } from '@typing/variables';
+import { ContentPackage, ContentSource, Inventory, InventoryItem, Item, LivingEntity } from '@schemas/content';
+import { Operation } from '@schemas/operations';
+import { StoreID } from '@schemas/variables';
 import { getTraitIdByType, hasTraitType, TraitType } from '@utils/traits';
 import { getFinalAcValue, getFinalVariableValue } from '@variables/variable-helpers';
 import { addVariableBonus, getAllSkillVariables, getAllSpeedVariables } from '@variables/variable-manager';
@@ -40,7 +40,7 @@ export function getInvBulk(inv: Inventory | undefined) {
     totalBulk += getItemBulk(invItem);
 
     if (isItemContainer(invItem.item)) {
-      const ignoredBulk = invItem.item.meta_data?.bulk.ignored ?? 0;
+      const ignoredBulk = Number(invItem.item.meta_data?.bulk.ignored ?? 0);
       const containerTotalBulk = invItem.container_contents.reduce(
         (acc, containerItem) => acc + getItemBulk(containerItem),
         0
@@ -71,7 +71,7 @@ export function getItemBulk(invItem: InventoryItem) {
   const armorWornModifier = isItemArmor(invItem.item) && !invItem.is_equipped ? 1 : 0;
 
   const baseItemBulk = invItem.is_equipped
-    ? (invItem.item.meta_data?.bulk?.held_or_stowed ?? (parseFloat(invItem.item.bulk ?? '0') || 0))
+    ? Number(invItem.item.meta_data?.bulk?.held_or_stowed ?? (parseFloat(invItem.item.bulk ?? '0') || 0))
     : parseFloat(invItem.item.bulk ?? '0') || 0;
 
   totalBulk = (baseItemBulk + armorWornModifier) * getItemQuantity(invItem.item);
@@ -115,9 +115,13 @@ export function applyEquipmentPenalties(storeId: StoreID, entity: LivingEntity) 
     if (item.item.meta_data) {
       const strMod = getFinalVariableValue(STORE_ID, 'ATTRIBUTE_STR').total;
       // If strength requirement exists and the character's str mod is >= to it, reduce/not include it
-      if (item.item.meta_data.strength !== undefined && strMod >= item.item.meta_data.strength) {
+      if (
+        item.item.meta_data.strength !== null &&
+        item.item.meta_data.strength !== undefined &&
+        strMod >= item.item.meta_data.strength
+      ) {
         // Take speed penalty, reduced by 5, to all Speeds
-        const speedPenalty = Math.abs(item.item.meta_data.speed_penalty ?? 0) - 5;
+        const speedPenalty = Math.abs(Number(item.item.meta_data.speed_penalty ?? 0)) - 5;
         if (speedPenalty > 0) {
           for (const speed of getAllSpeedVariables(STORE_ID)) {
             addVariableBonus(STORE_ID, speed.name, -1 * speedPenalty, undefined, '', `${item.item.name}`);
@@ -125,9 +129,9 @@ export function applyEquipmentPenalties(storeId: StoreID, entity: LivingEntity) 
         }
 
         // If armor is noisy, apply to Stealth checks even if you meet the required Strength score
-        const isNoisy = hasTraitType('NOISY', item.item.traits);
+        const isNoisy = hasTraitType('NOISY', item.item.traits ?? undefined);
         if (isNoisy) {
-          const checkPenalty = Math.abs(item.item.meta_data.check_penalty ?? 0);
+          const checkPenalty = Math.abs(Number(item.item.meta_data.check_penalty ?? 0));
           if (checkPenalty > 0) {
             const stealthSkill = getAllSkillVariables(STORE_ID).find((skill) => skill.name === 'SKILL_STEALTH');
             if (stealthSkill) {
@@ -146,13 +150,13 @@ export function applyEquipmentPenalties(storeId: StoreID, entity: LivingEntity) 
         // If the strength requirement doesn't exist, always include penalty.
         //
         // Take check penalty to Strength- and Dexterity-based skill checks (except for those that have the attack trait)
-        const checkPenalty = Math.abs(item.item.meta_data.check_penalty ?? 0);
+        const checkPenalty = Math.abs(Number(item.item.meta_data.check_penalty ?? 0));
         if (checkPenalty > 0) {
           const attrs = ['ATTRIBUTE_STR', 'ATTRIBUTE_DEX'];
           let skills = getAllSkillVariables(STORE_ID).filter((skill) => attrs.includes(skill.value.attribute ?? ''));
 
           // If armor is flexible, don't apply to Acrobatics or Athletics
-          const isFlexible = hasTraitType('FLEXIBLE', item.item.traits);
+          const isFlexible = hasTraitType('FLEXIBLE', item.item.traits ?? undefined);
           if (isFlexible) {
             skills = skills.filter((skill) => skill.name !== 'SKILL_ACROBATICS' && skill.name !== 'SKILL_ATHLETICS');
           }
@@ -170,7 +174,7 @@ export function applyEquipmentPenalties(storeId: StoreID, entity: LivingEntity) 
         }
 
         // Take full speed penalty to all Speeds
-        const speedPenalty = Math.abs(item.item.meta_data.speed_penalty ?? 0);
+        const speedPenalty = Math.abs(Number(item.item.meta_data.speed_penalty ?? 0));
         if (speedPenalty > 0) {
           for (const speed of getAllSpeedVariables(STORE_ID)) {
             addVariableBonus(STORE_ID, speed.name, -1 * speedPenalty, undefined, '', `${item.item.name}`);
@@ -193,7 +197,7 @@ export function applyEquipmentPenalties(storeId: StoreID, entity: LivingEntity) 
  * @param inv - Inventory
  * @returns - The best armor inventory item
  */
-export function getBestArmor(id: StoreID, inv?: Inventory) {
+export function getBestArmor(id: StoreID, inv?: Inventory | null) {
   if (!inv) {
     return null;
   }
@@ -404,11 +408,11 @@ export function getItemQuantity(item: Item) {
  * @returns - Whether the item is broken
  */
 export function isItemBroken(item: Item) {
-  const bt = item.meta_data?.broken_threshold ?? 0;
+  const bt = Number(item.meta_data?.broken_threshold ?? 0);
   const hp = item.meta_data?.hp;
 
   if (hp === undefined || hp === null) return false;
-  if (bt > 0 && hp <= bt) {
+  if (bt > 0 && Number(hp) <= bt) {
     return true;
   }
   return false;
@@ -438,7 +442,7 @@ export function isItemFormula(invItem: InventoryItem) {
  * @returns - Whether the item is investable
  */
 export function isItemInvestable(item: Item) {
-  return hasTraitType('INVESTED', item.traits);
+  return hasTraitType('INVESTED', item.traits ?? undefined);
 }
 
 /**
@@ -447,7 +451,7 @@ export function isItemInvestable(item: Item) {
  * @returns - Whether the item is implantable
  */
 export function isItemImplantable(item: Item) {
-  return hasTraitType('AUGMENTATION', item.traits);
+  return hasTraitType('AUGMENTATION', item.traits ?? undefined);
 }
 
 /**
@@ -483,6 +487,11 @@ export function isItemWithPropertyRunes(item: Item) {
     item.meta_data.runes.property.length > 0 &&
     item.meta_data.runes.property.every((r) => r.id && r.name)
   );
+}
+
+export function isItemWithMaterial(item: Item) {
+  if (!item.meta_data?.material) return false;
+  return !!(item.meta_data.material.type || item.meta_data.material.grade);
 }
 
 // Fundamental Rune IDs Map
@@ -547,7 +556,25 @@ export function isItemWithQuantity(item: Item) {
       return false;
     }
   }
-  return hasTraitType('CONSUMABLE', item.traits) || (item.meta_data?.quantity && item.meta_data.quantity > 0);
+  return (
+    hasTraitType('CONSUMABLE', item.traits ?? undefined) || (item.meta_data?.quantity && item.meta_data.quantity > 0)
+  );
+}
+
+/**
+ * Utility function to determine if an item has health to show
+ * @param item - Item
+ * @returns - Whether the item has health to show
+ */
+export function isItemWithHealth(item: Item) {
+  const health = getItemHealth(item);
+
+  // If item has health and it's not a weapon,
+  // or if it is a weapon but also is armor or a shield
+  const hasHealth =
+    !!health.hp_max && (!isItemWeapon(item) || (isItemWeapon(item) && (isItemArmor(item) || isItemShield(item))));
+
+  return hasHealth;
 }
 
 /**
@@ -592,7 +619,7 @@ export function isItemShield(item: Item) {
  * @returns - Whether the item is a stave
  */
 export function isItemStave(item: Item) {
-  return hasTraitType('STAFF', item.traits);
+  return hasTraitType('STAFF', item.traits ?? undefined);
 }
 
 /**
@@ -635,7 +662,7 @@ export function determineItemMetaType(item: Item, includeLevel?: boolean): strin
  * @returns - Whether the item is archaic
  */
 export function isItemArchaic(item: Item) {
-  if (hasTraitType('ARCHAIC', item.traits)) {
+  if (hasTraitType('ARCHAIC', item.traits ?? undefined)) {
     return true;
   }
   if (!isPlayingStarfinder()) {
@@ -647,7 +674,7 @@ export function isItemArchaic(item: Item) {
     return false;
   }
 
-  return (isItemWeapon(item) || isItemArmor(item)) && source.group.startsWith('pathfinder');
+  return (isItemWeapon(item) || isItemArmor(item)) && (source.group ?? '').startsWith('pathfinder');
 }
 
 /**
@@ -768,10 +795,10 @@ export function getImplantLimit(id: StoreID) {
  * @returns - Health values
  */
 export function getItemHealth(item: Item) {
-  const bt = item.meta_data?.broken_threshold ?? 0;
-  const hardness = item.meta_data?.hardness ?? 0;
-  const hp_max = item.meta_data?.hp_max ?? 0;
-  const hp = item.meta_data?.hp ?? 0;
+  const bt = Number(item.meta_data?.broken_threshold ?? 0);
+  const hardness = Number(item.meta_data?.hardness ?? 0);
+  const hp_max = Number(item.meta_data?.hp_max ?? 0);
+  const hp = Number(item.meta_data?.hp ?? 0);
 
   const improvements = getGradeImprovements(item);
 

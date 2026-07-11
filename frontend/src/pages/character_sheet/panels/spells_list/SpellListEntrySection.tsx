@@ -3,9 +3,9 @@ import { SpellSelectionOption } from '@common/select/SelectContent';
 import { Text } from '@mantine/core';
 import { StatButton } from '@pages/character_builder/CharBuilderCreation';
 import { isCantrip, isRitual } from '@spells/spell-utils';
-import { LivingEntity, Spell } from '@typing/content';
-import { StoreID } from '@typing/variables';
-import { useRecoilState } from 'recoil';
+import { LivingEntity, Spell } from '@schemas/content';
+import { StoreID } from '@schemas/variables';
+import { useAtom } from 'jotai';
 
 export default function SpellListEntrySection(props: {
   id: StoreID;
@@ -21,7 +21,7 @@ export default function SpellListEntrySection(props: {
   leftSection?: React.ReactNode;
   prefix?: React.ReactNode;
 }) {
-  const [_drawer, openDrawer] = useRecoilState(drawerState);
+  const [_drawer, openDrawer] = useAtom(drawerState);
   const exhausted = props.spell && isCantrip(props.spell) ? false : props.exhausted;
 
   if (props.spell) {

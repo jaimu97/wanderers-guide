@@ -7,8 +7,8 @@ import { fetchContentById } from '@content/content-store';
 import ShowInjectedText from '@drawers/ShowInjectedText';
 import { Title, Text, Image, Loader, Group, Divider, Stack, Box, Flex } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
-import { AbilityBlock, Trait } from '@typing/content';
-import { Operation } from '@typing/operations';
+import { AbilityBlock, Trait } from '@schemas/content';
+import { Operation } from '@schemas/operations';
 import { toLabel } from '@utils/strings';
 
 export function TraitDrawerTitle(props: { data: { id?: number; trait?: Trait } }) {
@@ -18,7 +18,7 @@ export function TraitDrawerTitle(props: { data: { id?: number; trait?: Trait } }
     queryKey: [`find-trait-${id}`, { id }],
     queryFn: async ({ queryKey }) => {
       // @ts-ignore
-      // eslint-disable-next-line
+       
       const [_key, { id }] = queryKey;
       return await fetchContentById<Trait>('trait', id);
     },
@@ -49,7 +49,7 @@ export function TraitDrawerContent(props: { data: { id?: number; trait?: Trait }
     queryKey: [`find-trait-${id}`, { id }],
     queryFn: async ({ queryKey }) => {
       // @ts-ignore
-      // eslint-disable-next-line
+       
       const [_key, { id }] = queryKey;
       return await fetchContentById<Trait>('trait', id);
     },

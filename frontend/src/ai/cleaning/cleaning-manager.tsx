@@ -1,4 +1,4 @@
-import { ContentType, Item } from '@typing/content';
+import { ContentType, Item } from '@schemas/content';
 import { fixItem } from './item-cleaning';
 
 export type CleaningLogType = 'thought' | 'tool' | 'error' | 'done' | 'info';
@@ -32,7 +32,11 @@ export async function cleanContent(cleaningRecordId: string, type: ContentType, 
     addCleaningLog(cleaningRecordId, 'done', 'Cleaned successfully');
 
     localStorage.setItem(`cleaning-status-${cleaningRecordId}`, 'done' satisfies CleaningStatus);
-    localStorage.setItem(`cleaning-result-${cleaningRecordId}`, JSON.stringify({ type, content: fixedContent }));
+
+    const stampedContent = fixedContent
+      ? { ...fixedContent, meta_data: { ...fixedContent.meta_data, cleaning: { updatedAt: new Date().toISOString() } } }
+      : fixedContent;
+    localStorage.setItem(`cleaning-result-${cleaningRecordId}`, JSON.stringify({ type, content: stampedContent }));
   } catch (e: any) {
     addCleaningLog(cleaningRecordId, 'error', e?.message ?? 'An unknown error occurred');
     localStorage.setItem(`cleaning-status-${cleaningRecordId}`, 'error' satisfies CleaningStatus);
@@ -84,7 +88,17 @@ export function addCleaningLog(cleaningRecordId: string, logType: string, data: 
   };
 
   logs.push(entry);
-  localStorage.setItem(`cleaning-log-${cleaningRecordId}`, JSON.stringify(logs));
+  try {
+    localStorage.setItem(`cleaning-log-${cleaningRecordId}`, JSON.stringify(logs));
+  } catch {
+    // localStorage quota exceeded — prune all 'size' and 'warn' entries older than the last 10 and retry
+    const pruned = logs.filter((l, i) => i >= logs.length - 10 || (l.type !== 'info' && l.type !== 'thought'));
+    try {
+      localStorage.setItem(`cleaning-log-${cleaningRecordId}`, JSON.stringify(pruned));
+    } catch {
+      // Still too large — give up storing this log; don't crash the run
+    }
+  }
 }
 
 /**
@@ -107,6 +121,16 @@ export function getCleaningStatus(cleaningRecordId: string): CleaningStatus {
 export function getCleaningResult(cleaningRecordId: string): { type: ContentType; content: any } | null {
   const raw = localStorage.getItem(`cleaning-result-${cleaningRecordId}`);
   return raw ? JSON.parse(raw) : null;
+}
+
+/**
+ * Clears all cleaning data for a single session (log, status, result, input).
+ */
+export function clearCleaningSession(cleaningRecordId: string) {
+  localStorage.removeItem(`cleaning-log-${cleaningRecordId}`);
+  localStorage.removeItem(`cleaning-status-${cleaningRecordId}`);
+  localStorage.removeItem(`cleaning-result-${cleaningRecordId}`);
+  localStorage.removeItem(`cleaning-input-${cleaningRecordId}`);
 }
 
 /**
