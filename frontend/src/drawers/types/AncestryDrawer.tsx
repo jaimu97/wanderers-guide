@@ -5,7 +5,7 @@ import RichText from '@common/RichText';
 import TraitsDisplay from '@common/TraitsDisplay';
 import { FeatSelectionOption, HeritageSelectionOption } from '@common/select/SelectContent';
 import { isAbilityBlockVisible } from '@content/content-hidden';
-import { fetchContentAll, fetchContentById, getDefaultSources } from '@content/content-store';
+import { fetchContentAll, fetchContentById, getDefaultSources, getDefaultSourcesKey } from '@content/content-store';
 import { getIconFromContentType } from '@content/content-utils';
 import ShowOperationsButton from '@drawers/ShowOperationsButton';
 import { getMetadataOpenedDict } from '@drawers/drawer-utils';
@@ -30,6 +30,7 @@ import { IMPRINT_BG_COLOR, IMPRINT_BORDER_COLOR } from '@constants/data';
 import { addedAncestryLanguages, getAdjustedAncestryOperations } from '@operations/operation-controller';
 import { IconChevronsDown, IconChevronsUp, IconHelpCircle } from '@tabler/icons-react';
 import { useQuery } from '@tanstack/react-query';
+import DrawerLoadState from '@drawers/DrawerLoadState';
 import { AbilityBlock, Ancestry, Character, Language } from '@schemas/content';
 import { DrawerType } from '@schemas/index';
 import { OperationResult } from '@schemas/operations';
@@ -46,7 +47,7 @@ export function AncestryDrawerTitle(props: { data: { id?: number; ancestry?: Anc
 
   const [_drawer, openDrawer] = useAtom(drawerState);
 
-  const { data: _ancestry } = useQuery({
+  const { data: _ancestry, isFetching, refetch } = useQuery({
     queryKey: [`find-ancestry-${id}`, { id }],
     queryFn: async ({ queryKey }) => {
       // @ts-ignore
@@ -94,8 +95,8 @@ export function AncestryDrawerContent(props: {
 }) {
   const id = props.data.id;
 
-  const { data } = useQuery({
-    queryKey: [`find-ancestry-details-${id}`, { id }],
+  const { data, isFetching, refetch } = useQuery({
+    queryKey: [`find-ancestry-details-${id}`, { id, sources: getDefaultSourcesKey('INFO') }],
     queryFn: async ({ queryKey }) => {
       // @ts-ignore
        
@@ -174,15 +175,7 @@ export function AncestryDrawerContent(props: {
 
   if (!data || !data.ancestry || !data.abilityBlocks) {
     return (
-      <Loader
-        type='bars'
-        style={{
-          position: 'absolute',
-          top: '35%',
-          left: '50%',
-          transform: 'translate(-50%, -50%)',
-        }}
-      />
+      <DrawerLoadState loading={isFetching} onRetry={refetch} />
     );
   }
 

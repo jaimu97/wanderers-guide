@@ -1,7 +1,7 @@
 import { drawerState } from '@atoms/navAtoms';
 import RichText from '@common/RichText';
 import { ActionSelectionOption } from '@common/select/SelectContent';
-import { fetchContentAll, getDefaultSources } from '@content/content-store';
+import { fetchContentAll, getDefaultSources, getDefaultSourcesKey } from '@content/content-store';
 import { convertToHardcodedLink } from '@content/hardcoded-links';
 import {
   Title,
@@ -347,6 +347,9 @@ function getProfDescription(variableName: string) {
   if (variableName === 'WEAPON_DIVISION_GUN') {
     return `Any ranged weapon with the analog or tech trait.`;
   }
+  if (variableName === 'WEAPON_DIVISION_ONE_HANDED_AGILE_FINESSE') {
+    return `Any one-handed weapon with the agile or finesse trait.`;
+  }
 
   if (variableName === 'SAVE_FORT') {
     return `A Fortitude saving throw is used when your character’s health or vitality is under attack, such as from ${convertToHardcodedLink('trait', 'poison')} or ${convertToHardcodedLink('trait', 'disease')}.`;
@@ -407,6 +410,12 @@ function getProfDescription(variableName: string) {
   if (variableName === 'SKILL_THIEVERY') {
     return `You are trained in a particular set of skills favored by thieves and miscreants.`;
   }
+  if (variableName === 'SKILL_COMPUTERS') {
+    return `Computers measures your ability to operate, program, and hack computer systems and other digital devices. You can use it to ${convertToHardcodedLink('action', 'Recall Knowledge')} about computer systems, networks, and digital security.`;
+  }
+  if (variableName === 'SKILL_PILOTING') {
+    return `Piloting measures your ability to operate vehicles and starships, from ground transports to interstellar craft. You can use it to ${convertToHardcodedLink('action', 'Recall Knowledge')} about vehicles and their operation.`;
+  }
   if (variableName.startsWith('SKILL_LORE_')) {
     return `You have specialized information on a narrow topic. Lore features many subcategories.
     The GM determines what other subcategories they’ll allow as Lore skills, though these categories are always less broad than any of the other skills that allow you to ${convertToHardcodedLink('action', 'Recall Knowledge')}, and they should never be able to take the place of another skill’s ${convertToHardcodedLink('action', 'Recall Knowledge')} action. For instance, you couldn’t choose Magic Lore to recall the breadth of knowledge about magic covered by Arcana, Nature, Occultism, and Religion, or choose Adventuring Lore to give you all the information an adventurer needs, or choose Planar Lore to gain all the information spread across various skills and subcategories such as Heaven Lore. 
@@ -420,7 +429,10 @@ function SkillActionsSection(props: { variableName: string }) {
   const [_drawer, openDrawer] = useAtom(drawerState);
 
   const { data: actions } = useQuery({
-    queryKey: [`find-skill-actions-${props.variableName}`, { variableName: props.variableName }],
+    queryKey: [
+      `find-skill-actions-${props.variableName}`,
+      { variableName: props.variableName, sources: getDefaultSourcesKey('PAGE') },
+    ],
     queryFn: async ({ queryKey }) => {
       // @ts-ignore
        

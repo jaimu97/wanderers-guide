@@ -27,7 +27,7 @@ import {
   labelizeBulk,
   isItemWithHealth,
 } from '@items/inv-utils';
-import { getWeaponStats, parseOtherDamage } from '@items/weapon-handler';
+import { getWeaponGroup, getWeaponStats, parseOtherDamage } from '@items/weapon-handler';
 import {
   Title,
   Text,
@@ -51,6 +51,7 @@ import {
 import { getHotkeyHandler } from '@mantine/hooks';
 import { IconHelpCircle } from '@tabler/icons-react';
 import { useQuery } from '@tanstack/react-query';
+import DrawerLoadState from '@drawers/DrawerLoadState';
 import { Item, ItemMetaGroupArmor, ItemMetaGroupWeapon } from '@schemas/content';
 import { StoreID } from '@schemas/variables';
 import { sign } from '@utils/numbers';
@@ -71,7 +72,7 @@ import { titleCase } from 'title-case';
 export function ItemDrawerTitle(props: { data: { id?: number; item?: Item } }) {
   const id = props.data.id;
 
-  const { data: _item } = useQuery({
+  const { data: _item, isFetching, refetch } = useQuery({
     queryKey: [`find-item-${id}`, { id }],
     queryFn: async ({ queryKey }) => {
       // @ts-ignore
@@ -118,7 +119,7 @@ export function ItemDrawerContent(props: {
   const [_drawer, openDrawer] = useAtom(drawerState);
   const theme = useMantineTheme();
 
-  const { data: _item } = useQuery({
+  const { data: _item, isFetching, refetch } = useQuery({
     queryKey: [`find-item-with-base-${id}`, { id }],
     queryFn: async ({ queryKey }) => {
       // @ts-ignore
@@ -146,15 +147,7 @@ export function ItemDrawerContent(props: {
 
   if (!item) {
     return (
-      <Loader
-        type='bars'
-        style={{
-          position: 'absolute',
-          top: '35%',
-          left: '50%',
-          transform: 'translate(-50%, -50%)',
-        }}
-      />
+      <DrawerLoadState loading={isFetching} onRetry={refetch} />
     );
   }
 
@@ -676,10 +669,12 @@ function MiscItemSections(props: { item: Item; store: StoreID; openDrawer: Sette
   }
 
   let categoryAndGroupSection = null;
-  if (props.item.meta_data?.category || props.item.meta_data?.group) {
+  // Effective group can come from a player-selected override (e.g. Solar Weapon)
+  const effectiveGroup = getWeaponGroup(props.store, props.item);
+  if (props.item.meta_data?.category || effectiveGroup) {
     let groupDesc =
-      getWeaponSpecialization(props.item.meta_data?.group as ItemMetaGroupWeapon) ??
-      getArmorSpecialization(props.item.meta_data?.group as ItemMetaGroupArmor);
+      getWeaponSpecialization(effectiveGroup as ItemMetaGroupWeapon) ??
+      getArmorSpecialization(effectiveGroup as ItemMetaGroupArmor);
     if (groupDesc) {
       if (hasAttackAndDamage) {
         groupDesc = {
@@ -708,7 +703,7 @@ function MiscItemSections(props: { item: Item; store: StoreID; openDrawer: Sette
               </Text>
             </Group>
           )}
-          {props.item.meta_data?.group && (
+          {effectiveGroup && (
             <Group wrap='nowrap' gap={10}>
               <Text fw={600} c='gray.2' span>
                 Group
@@ -724,7 +719,7 @@ function MiscItemSections(props: { item: Item; store: StoreID; openDrawer: Sette
               >
                 <HoverCard.Target>
                   <Text c='gray.2' style={{ cursor: groupDesc ? 'pointer' : undefined }} span>
-                    {toLabel(props.item.meta_data?.group)}
+                    {toLabel(effectiveGroup)}
                   </Text>
                 </HoverCard.Target>
                 <HoverCard.Dropdown>

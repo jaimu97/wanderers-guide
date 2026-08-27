@@ -1,6 +1,12 @@
 import { generateNames } from '@ai/fantasygen-dev/name-controller';
 import { GroupLinkSwitch, LinkSwitch, LinksGroup } from '@common/LinksGroup';
-import { GUIDE_BLUE, IMPRINT_BG_COLOR, IMPRINT_BG_COLOR_HOVER, IMPRINT_BORDER_COLOR } from '@constants/data';
+import {
+  GAMEMASTERY_GUIDE_ID,
+  GUIDE_BLUE,
+  IMPRINT_BG_COLOR,
+  IMPRINT_BG_COLOR_HOVER,
+  IMPRINT_BORDER_COLOR,
+} from '@constants/data';
 import {
   Stack,
   Group,
@@ -205,9 +211,10 @@ export default function CharBuilderHome(props: { characterId: number; pageHeight
         resetContentStore();
         defineDefaultSources('PAGE', newEnabled ?? []);
         refetch();
-        queryClient.invalidateQueries({
-          queryKey: [`find-content-${character?.id}`, `get-character-init-builder-${character?.id}`],
-        });
+        // One call per query: a queryKey filter is an element-wise prefix, so combining these
+        // two root strings into a single filter array matches neither query.
+        queryClient.invalidateQueries({ queryKey: [`find-content-${character?.id}`] }); // character sheet content package
+        queryClient.invalidateQueries({ queryKey: [`get-character-init-builder-${character?.id}`] }); // builder character record
 
         // Save new enabled books to character
         return {
@@ -221,11 +228,14 @@ export default function CharBuilderHome(props: { characterId: number; pageHeight
     };
 
     if (enabled) {
-      // Handle dependency logic
-      const requiredBooks = await findRequiredContentSources(
-        uniq([...(character?.content_sources?.enabled ?? []), ...inputIds])
-      );
-      if (requiredBooks.newSources.length > 0) {
+      // Handle dependency logic. Walk requirements from ONLY the newly toggled books and
+      // treat anything already enabled as satisfied — computing over the whole enabled set
+      // meant one stale dependency anywhere re-prompted on every toggle of every book,
+      // homebrew included (the Revenge of the Runelords incident).
+      const alreadyEnabled = character?.content_sources?.enabled ?? [];
+      const requiredBooks = await findRequiredContentSources(inputIds);
+      const missingSources = requiredBooks.newSources.filter((source) => !alreadyEnabled.includes(source.id));
+      if (missingSources.length > 0) {
         modals.openConfirmModal({
           title: <Title order={3}>Enable Dependencies</Title>,
           children: (
@@ -235,7 +245,7 @@ export default function CharBuilderHome(props: { characterId: number; pageHeight
                 them.
               </Text>
               <List>
-                {requiredBooks.newSources.map((source, index) => (
+                {missingSources.map((source, index) => (
                   <List.Item key={index}>
                     <Anchor
                       onClick={() => {
@@ -606,7 +616,7 @@ export default function CharBuilderHome(props: { characterId: number; pageHeight
                     });
                   }}
                 />
-                {/* <LinkSwitch
+                <LinkSwitch
                   label='Stamina'
                   info={`In some fantasy stories, the heroes are able to avoid any serious injury until the situation gets dire, getting by with a graze or a flesh wound and needing nothing more than a quick rest to get back on their feet. If your group wants to tell tales like those, you can use the stamina variant to help make that happen.`}
                   url='https://2e.aonprd.com/Rules.aspx?ID=1378'
@@ -616,6 +626,21 @@ export default function CharBuilderHome(props: { characterId: number; pageHeight
                       if (!prev) return prev;
                       return {
                         ...prev,
+                        // Start the pools at -1 when enabling — the "full" sentinel (the sheet
+                        // renders negative pool values as their max).
+                        ...(enabled ? { stamina_current: -1, resolve_current: -1 } : {}),
+                        // Auto-enable the Gamemastery Guide book so the variant's supporting
+                        // content (Take a Breather, stamina feats) is available. Left enabled
+                        // when the variant is turned off — the player may be using other GMG
+                        // content and can disable the book themselves.
+                        ...(enabled
+                          ? {
+                              content_sources: {
+                                ...prev.content_sources,
+                                enabled: uniq([...(prev.content_sources?.enabled ?? []), GAMEMASTERY_GUIDE_ID]),
+                              },
+                            }
+                          : {}),
                         variants: {
                           ...prev.variants,
                           stamina: enabled,
@@ -623,7 +648,7 @@ export default function CharBuilderHome(props: { characterId: number; pageHeight
                       };
                     });
                   }}
-                /> */}
+                />
               </Stack>
             </Tabs.Panel>
 
@@ -1160,12 +1185,16 @@ export default function CharBuilderHome(props: { characterId: number; pageHeight
             const applySettings = async () => {
               setCharacter((prev) => {
                 if (!prev) return prev;
+                // If the campaign settings newly enable the stamina variant, start the pools at
+                // -1 — the "full" sentinel (the sheet renders negative pool values as their max).
+                const enablingStamina = campaign?.recommended_variants?.stamina && !prev.variants?.stamina;
                 return {
                   ...prev,
                   content_sources: campaign?.recommended_content_sources,
                   variants: campaign?.recommended_variants,
                   options: campaign?.recommended_options,
                   custom_operations: campaign?.custom_operations,
+                  ...(enablingStamina ? { stamina_current: -1, resolve_current: -1 } : {}),
                 };
               });
             };

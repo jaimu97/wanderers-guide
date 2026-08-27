@@ -81,8 +81,8 @@ Do **not** manually wrap "frightened", "concealed", "stupefied", "persistent fir
 
 | Type | Examples |
 |---|---|
-| **trait** | damage types (*fire*, *cold*, *electricity*, *slashing*), categories (*physical*, *spell*), materials (*cold iron*), descriptors (*death*, *poison*, *disease*) |
-| **action** | basic actions (*Strike*, *Escape*, *Seek*), named activities (*Treat Wounds*, *Recall Knowledge*, *Subsist*) |
+| **trait** | ENERGY damage types (*fire*, *cold*, *electricity*, *acid*, *sonic*, *vitality*, *void*), categories (*physical*, *spell*), materials (*cold iron*), descriptors (*death*, *poison*, *disease*), effect kinds in "X effect" phrases, and the trait lists in ability parentheticals (e.g. `**High Winds** ([air](link_trait_1524), [aura](link_trait_1492)) 30 feet`) |
+| **action** | basic actions (*Strike*, *Escape*, *Seek*, *Dismiss*), named activities (*Treat Wounds*, *Recall Knowledge*, *Subsist*), and *Cast a Spell* — including inflected prose like "as part of Casting this Spell", which links to the Cast a Spell action with the natural wording as display text |
 | **feat** | named feats referenced in prose (*Continual Recovery*, *Ward Medic*) |
 | **spell** | specific spells mentioned by name (*Fireball*, *Charm*, *Confusion*) |
 | **item** | named items |
@@ -94,6 +94,8 @@ Do **not** manually wrap "frightened", "concealed", "stupefied", "persistent fir
 - **Skill names used abstractly** — *Acrobatics*, *Athletics*, etc. when referenced as concepts (not drawer-linkable as content).
 - **Attribute names** — *Strength*, *Dexterity*, etc. (not drawer-linkable).
 - **Generic terms** — *spell*, *attack*, *creature* used as common nouns.
+- **PHYSICAL damage types** — *bludgeoning*, *piercing*, *slashing* have **no trait records** in the database, so there is nothing to link them to. Only energy/alignment-style damage types are traits. (Likewise there is currently no *Affliction* trait — "affliction" stays plain text unless one is added.)
+- **Foundry import artifacts** — legacy rows sometimes contain `\[\[Spell Effect: ...\]\]{Label}` or `@UUID[...]` tokens leaked from Foundry VTT imports. These are NOT WG syntax and render as literal junk. When porting or cleaning content, delete them (keep only the human label, e.g. `**Air Elemental**`).
 
 ## Disambiguation
 
@@ -331,6 +333,33 @@ Activation lines have a standard format:
 ```markdown
 **Activate—Title** <abbr cost="TWO-ACTIONS" class="action-symbol">2</abbr> ([trait](link_trait_X), ...); **Effect** ...
 ```
+
+## Direct SQL inserts (admin path)
+
+Content normally enters through the submission flow (`create-content-update` -> mod approval), which
+computes housekeeping fields for you. When inserting official rows directly via SQL (the admin
+Management-API path — e.g. porting reprints on the owner's request), replicate them yourself:
+
+- **`uuid`** — compute exactly what `insertData` would: `uniqueId(name, type, level, source)` from
+  [upload-utils.ts](supabase/functions/_shared/upload-utils.ts), i.e.
+  `cyrb53(`${name.trim()}_${type.trim()}_${level}_${content_source_id}`.toLowerCase())` where `type` is the row's
+  `type` column value when the table has one (ability-block subtypes like `feat`), otherwise the table
+  name (`spell`, `item`, ...), and `level` is `level ?? rank ?? 0`. cyrb53 is easy to port (32-bit
+  `Math.imul` semantics — mask to 32 bits in other languages). A wrong or missing uuid breaks
+  duplicate detection on future imports.
+- **Reserved column names** — `"cast"`, `"trigger"`, and `"range"` must be double-quoted in the
+  INSERT column list or Postgres rejects the statement.
+- **Dollar-quote descriptions** (`$wgdesc$...$wgdesc$`) — prose is full of apostrophes and quotes.
+- **Cache tokens are automatic** — the `content_source.updated_at` triggers bump on INSERT, UPDATE,
+  and DELETE of child content, so clients re-fetch without any manual token bump.
+- **Ids are per-table** — a spell id and an ability-block id can collide numerically. Existence
+  checks must query the table matching the content's type (a "#5426 doesn't exist" check against the
+  wrong table once hid a spell that was very much alive).
+- **Start from the nearest existing row** — for reprints, clone the legacy or sibling row (its
+  description already carries WG links and conventions) and apply only the verified diffs from the
+  source book / AoN, rather than re-typing from scratch. Strip Foundry import junk while you're there.
+- **Verify render, not just the row** — open `https://wanderersguide.app/?open=link_TYPE_ID` and
+  check the drawer: links resolve, conditions auto-link, traits/stat lines display.
 
 ## When you're cleaning/generating content programmatically
 

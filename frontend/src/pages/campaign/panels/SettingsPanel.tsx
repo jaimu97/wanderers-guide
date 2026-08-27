@@ -128,11 +128,14 @@ export default function SettingsPanel(props: {
     };
 
     if (enabled) {
-      // Handle dependency logic
-      const requiredBooks = await findRequiredContentSources(
-        uniq([...(props.campaign?.recommended_content_sources?.enabled ?? []), ...inputIds])
-      );
-      if (requiredBooks.newSources.length > 0) {
+      // Handle dependency logic. Walk requirements from ONLY the newly toggled books and
+      // treat anything already enabled as satisfied — computing over the whole enabled set
+      // meant one stale dependency anywhere re-prompted on every toggle of every book
+      // (the Revenge of the Runelords incident).
+      const alreadyEnabled = props.campaign?.recommended_content_sources?.enabled ?? [];
+      const requiredBooks = await findRequiredContentSources(inputIds);
+      const missingSources = requiredBooks.newSources.filter((source) => !alreadyEnabled.includes(source.id));
+      if (missingSources.length > 0) {
         modals.openConfirmModal({
           title: <Title order={3}>Enable Dependencies</Title>,
           children: (
@@ -142,7 +145,7 @@ export default function SettingsPanel(props: {
                 them.
               </Text>
               <List>
-                {requiredBooks.newSources.map((source, index) => (
+                {missingSources.map((source, index) => (
                   <List.Item key={index}>
                     <Anchor
                       onClick={() => {
@@ -494,24 +497,21 @@ export default function SettingsPanel(props: {
                     });
                   }}
                 />
-                {/* <LinkSwitch
+                <LinkSwitch
                   label='Stamina'
                   info={`In some fantasy stories, the heroes are able to avoid any serious injury until the situation gets dire, getting by with a graze or a flesh wound and needing nothing more than a quick rest to get back on their feet. If your group wants to tell tales like those, you can use the stamina variant to help make that happen.`}
                   url='https://2e.aonprd.com/Rules.aspx?ID=1378'
                   enabled={props.campaign?.recommended_variants?.stamina}
                   onLinkChange={(enabled) => {
-                    setCharacter((prev) => {
-                      if (!prev) return prev;
-                      return {
-                        ...prev,
-                        variants: {
-                          ...prev.variants,
-                          stamina: enabled,
-                        },
-                      };
+                    props.setCampaign({
+                      ...props.campaign,
+                      recommended_variants: {
+                        ...props.campaign.recommended_variants,
+                        stamina: enabled,
+                      },
                     });
                   }}
-                /> */}
+                />
               </Stack>
             </Tabs.Panel>
 

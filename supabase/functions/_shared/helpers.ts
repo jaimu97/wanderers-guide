@@ -15,6 +15,24 @@ import type {
   Trait,
 } from './content';
 
+/**
+ * Structured, one-line JSON log for failure/anomaly paths, so incidents are
+ * queryable from `function_logs` (e.g. `event_message like '%"evt":"save_conflict"%'`).
+ * Never pass secrets or full row payloads in `fields` — ids, reasons, and error
+ * codes are enough to diagnose.
+ */
+export function logEvent(
+  level: 'info' | 'warn' | 'error',
+  fn: string,
+  event: string,
+  fields?: Record<string, unknown>
+) {
+  const line = JSON.stringify({ evt: event, fn, ...(fields ?? {}) });
+  if (level === 'error') console.error(line);
+  else if (level === 'warn') console.warn(line);
+  else console.log(line);
+}
+
 export async function connect<T = Record<string, any>>(
   req: Request,
   executeFn: (
@@ -127,6 +145,11 @@ export async function connect<T = Record<string, any>>(
       //
     }
   } catch (error) {
+    // Structured line first (queryable), full error object second (details).
+    logEvent('error', new URL(req.url).pathname.split('/').pop() ?? 'unknown', 'unhandled_error', {
+      message: (error as any)?.message ?? String(error),
+      code: (error as any)?.code,
+    });
     console.error(error);
     return new Response(
       JSON.stringify({
@@ -300,10 +323,29 @@ async function generateUserJWT(userId: string) {
   return jwt;
 }
 
+/**
+ * A service-role Supabase client (bypasses RLS and column grants). Use ONLY inside a
+ * function that has already validated the caller, and only to read/write rows the caller
+ * is entitled to. Needed since the public_user secret columns (api, patreon) are no longer
+ * SELECT-able by anon/authenticated over PostgREST — see migration
+ * 20260717000000_public_user_secret_columns — so a request-scoped client's all-column
+ * select of public_user would fail.
+ */
+export function createServiceClient(): SupabaseClient<any, 'public', any> {
+  return createClient(
+    // @ts-ignore
+    Deno.env.get('SUPABASE_URL') ?? '',
+    // @ts-ignore
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+  );
+}
+
 export async function getPublicUser(
   client: SupabaseClient<any, 'public', any>,
   token: string
 ): Promise<PublicUser | null> {
+  // Validate the caller with the request-scoped client first: this establishes WHO is
+  // asking (and only succeeds for a genuine session token).
   const {
     data: { user },
   } = await client.auth.getUser(token);
@@ -312,7 +354,11 @@ export async function getPublicUser(
     return null;
   }
 
-  const results = await fetchData<PublicUser>(client, 'public_user', [
+  // Read the row with a service-role client, not the caller's — otherwise the all-column
+  // select would fail on the now-restricted api/patreon columns. Not an escalation: we
+  // only read the already-validated caller's own row (user.id above), and callers that
+  // don't need the secrets simply ignore them.
+  const results = await fetchData<PublicUser>(createServiceClient(), 'public_user', [
     { column: 'user_id', value: user?.id },
   ]);
 
@@ -578,9 +624,13 @@ export async function fetchData<T = Record<string, any>>(
     return false;
   })(filters);
 
-  // Paginate through fetching rows, as there's a limit of rows per query
+  // Paginate through fetching rows, as there's a limit of rows per query.
+  // Keyset pagination (ORDER BY id + id > cursor) instead of OFFSET: without an ORDER BY,
+  // Postgres guarantees no row order across the separate chunk queries, so a plan flip
+  // mid-pagination silently drops or duplicates rows — an HTTP 200 with a partial corpus
+  // that clients then persist as complete. Every fetchData table has an `id` bigint PK.
   const CHUNK_SIZE = 5000;
-  let offset = 0;
+  let lastId: number | null = null;
   let allRows: T[] = [];
   let hasMore = true;
 
@@ -637,12 +687,15 @@ export async function fetchData<T = Record<string, any>>(
       query = query.gte('created_at', from).lte('created_at', to);
     }
 
-    const { data, error } = await query.range(offset, offset + CHUNK_SIZE - 1);
+    if (lastId !== null) {
+      query = query.gt('id', lastId);
+    }
+    const { data, error } = await query.order('id', { ascending: true }).limit(CHUNK_SIZE);
     if (error) throw error;
 
     if (data && data.length > 0) {
       allRows = allRows.concat(data);
-      offset += CHUNK_SIZE;
+      lastId = data[data.length - 1].id;
     }
 
     // Check if we've fetched all rows
@@ -705,10 +758,16 @@ export async function insertData<T = Record<string, any>>(
     data.name = data.name.replace(/’/g, "'");
   }
 
-  // Delete forbidden keys
+  // Delete forbidden keys. updated_at is server-owned (trigger-maintained, see
+  // migration 20260718000000): an echoed stale value must never override the
+  // column default or the trigger's stamp.
   delete data.id;
   delete data.created_at;
   delete data.version;
+  delete data.updated_at;
+  // GENERATED column — see the matching strip in updateData. INSERTs that echo a fetched
+  // row's search_tsv would be rejected the same way UPDATEs are.
+  delete data.search_tsv;
 
   const { data: insertedData, error } = await client.from(tableName).insert(data).select();
   if (error) {
@@ -816,11 +875,21 @@ export async function updateData(
     delete data.uuid;
   }
 
-  // Delete forbidden keys
+  // Delete forbidden keys. updated_at is server-owned (trigger-maintained, see
+  // migration 20260718000000): the bot replays stored full-row payloads, and an
+  // echoed stale timestamp must never rewind a source's change token.
   delete data.id;
   delete data.created_at;
   delete data.content_source_id;
   delete data.user_id;
+  delete data.updated_at;
+  // GENERATED columns can only be written as DEFAULT; Postgres rejects any UPDATE that
+  // sets them. Full-row payloads (the content-update bot replays the editor's snapshot,
+  // which includes search_tsv since the search work added it to every content table)
+  // were failing whole creature approvals with "column can only be updated to DEFAULT".
+  // If another generated column is ever added to a content table, strip it here too
+  // (mirrors the exclusion list in migration 20260729000000).
+  delete data.search_tsv;
 
   let error: any = null;
   let dataResult: any = null;
@@ -852,8 +921,11 @@ export async function updateData(
     }
   }
 
-  // Guarded update that matched no rows = the row changed since the caller's snapshot.
-  // (Distinguishing this from a non-existent / RLS-hidden row is left to the caller.)
+  // Guarded update that matched no rows. CALLERS MUST DISAMBIGUATE: this is either a
+  // real concurrency conflict (the guard column changed) OR a row the caller cannot
+  // UPDATE under RLS / cannot see at all. Re-read the row with the same client and
+  // compare the guard column — see update-character for the reference implementation.
+  // Treating an RLS-denied write as a conflict makes read-only clients retry forever.
   if (options?.guard && Array.isArray(dataResult) && dataResult.length === 0) {
     return { status: 'CONFLICT', data: null };
   }

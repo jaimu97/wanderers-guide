@@ -1,7 +1,8 @@
-import { Item } from '@schemas/content';
-import { StoreID, VariableBool, VariableListStr, VariableNum, VariableProf } from '@schemas/variables';
+import { getCachedContent } from '@content/content-store';
+import { Item, Trait } from '@schemas/content';
+import { StoreID, VariableBool, VariableListStr, VariableNum, VariableProf, VariableStr } from '@schemas/variables';
 import { hasTraitType } from '@utils/traits';
-import { getFinalProfValue, getFinalVariableValue } from '@variables/variable-helpers';
+import { getFinalProfValue, getFinalVariableValue, getProfValueParts } from '@variables/variable-helpers';
 import { getVariable } from '@variables/variable-manager';
 import { compileProficiencyType, labelToVariable } from '@variables/variable-utils';
 import { compileTraits, getGradeImprovements, isItemRangedWeapon } from './inv-utils';
@@ -485,6 +486,41 @@ function getMeleeAttackDamage(id: StoreID, item: Item) {
   };
 }
 
+/**
+ * Finds the skill proficiency variables tied to an item's Professional traits.
+ * SF2e "Professional (<Skill>)" traits are separate trait records per skill, so we match the
+ * item's trait IDs against cached traits by name pattern instead of hardcoding IDs.
+ * @param item - Item to inspect
+ * @returns - Skill variable names (e.g. SKILL_COMPUTERS) listed by the item's Professional traits
+ */
+function getProfessionalTraitSkills(item: Item): string[] {
+  const traitIds = new Set(compileTraits(item));
+  if (traitIds.size === 0) return [];
+
+  const skills: string[] = [];
+  for (const trait of getCachedContent<Trait>('trait')) {
+    if (!trait?.id || !traitIds.has(trait.id)) continue;
+    const match = /^professional \((.+?)\)/i.exec(trait.name.trim());
+    if (match) {
+      skills.push(`SKILL_${labelToVariable(match[1])}`);
+    }
+  }
+  return skills;
+}
+
+/**
+ * The weapon's effective group. A str variable named WEAPON_GROUP_OVERRIDE_<ITEM NAME>
+ * overrides the item's stored group — for weapons whose group is player-selected
+ * (e.g. the solarian's Solar Weapon, whose form is chosen and can be re-forged).
+ */
+export function getWeaponGroup(id: StoreID, item: Item): string | undefined {
+  const override = getVariable<VariableStr>(id, `WEAPON_GROUP_OVERRIDE_${labelToVariable(item.name)}`)?.value;
+  if (override && override.trim().length > 0) {
+    return override.trim().toLowerCase();
+  }
+  return item.meta_data?.group;
+}
+
 function getProfTotal(id: StoreID, item: Item) {
   let category = item.meta_data?.category ?? 'simple';
 
@@ -494,7 +530,8 @@ function getProfTotal(id: StoreID, item: Item) {
   const matchFamiliarity = () => {
     for (const f of familiarity) {
       if (item.name.trim().toUpperCase() === f) return true;
-      if (item.meta_data?.group && item.meta_data.group.trim().toUpperCase() === f) return true;
+      const effectiveGroup = getWeaponGroup(id, item);
+      if (effectiveGroup && effectiveGroup.trim().toUpperCase() === f) return true;
       // Don't use labelToVariable here, as it will remove the numbers for IDs
       if (!isNaN(parseInt(f)) && compileTraits(item).includes(parseInt(f))) return true;
     }
@@ -521,7 +558,7 @@ function getProfTotal(id: StoreID, item: Item) {
   }
   categoryProfTotal = parseInt(getFinalProfValue(id, categoryVariable));
 
-  const group = item.meta_data?.group ?? 'brawling';
+  const group = getWeaponGroup(id, item) ?? 'brawling';
 
   const groupVariable = `WEAPON_GROUP_${group.trim().toUpperCase()}`;
   const groupProfTotal = parseInt(getFinalProfValue(id, groupVariable));
@@ -556,6 +593,33 @@ function getProfTotal(id: StoreID, item: Item) {
   if (individualProfTotal > maxProfTotal) {
     maxProfTotal = individualProfTotal;
     maxVariable = individualVariable;
+  }
+
+  // Professional trait (SF2e): "For purposes of proficiency, you treat this martial weapon as a
+  // simple weapon or this advanced weapon as a martial weapon, up to your proficiency with the
+  // listed skill (if higher than your normal proficiency for this weapon)."
+  const professionalSkills = getProfessionalTraitSkills(item);
+  if (professionalSkills.length > 0) {
+    const rawCategory = item.meta_data?.category ?? 'simple';
+    const downgradedVariable =
+      rawCategory === 'martial' ? 'SIMPLE_WEAPONS' : rawCategory === 'advanced' ? 'MARTIAL_WEAPONS' : null;
+    if (downgradedVariable) {
+      const downgradedTotal = parseInt(getFinalProfValue(id, downgradedVariable));
+      for (const skillVariable of professionalSkills) {
+        const skillParts = getProfValueParts(id, skillVariable);
+        if (!skillParts) continue;
+        // The cap is the skill's proficiency (rank + level) — its attribute mod and skill-check
+        // bonuses don't carry over to attack proficiency
+        const skillCapTotal = skillParts.level + skillParts.profValue;
+        const candidateTotal = Math.min(downgradedTotal, skillCapTotal);
+        // "(if higher than your normal proficiency)" — only ever an upgrade
+        if (candidateTotal > maxProfTotal) {
+          maxProfTotal = candidateTotal;
+          // Attribute the winning rank to whichever side was the limiting factor, for the breakdown drawer
+          maxVariable = downgradedTotal <= skillCapTotal ? downgradedVariable : skillVariable;
+        }
+      }
+    }
   }
 
   // Martial Experience = "When wielding a weapon you aren't proficient with, treat your level as your proficiency bonus."
@@ -620,21 +684,29 @@ function convertDamageType(rawDamageType: string) {
  */
 export function determineWeaponDivisions(item: Item): string[] {
   const traitsIds = compileTraits(item);
+  const divisions: string[] = [];
 
+  // Gun: any ranged weapon with the analog or tech trait, split by category
   if (isItemRangedWeapon(item)) {
     if (hasTraitType('ANALOG', traitsIds) || hasTraitType('TECH', traitsIds)) {
       const category = item.meta_data?.category ?? 'simple';
+      divisions.push('WEAPON_DIVISION_GUN');
       if (category === 'simple') {
-        return ['WEAPON_DIVISION_GUN', 'WEAPON_DIVISION_GUN_SIMPLE'];
+        divisions.push('WEAPON_DIVISION_GUN_SIMPLE');
       } else if (category === 'martial') {
-        return ['WEAPON_DIVISION_GUN', 'WEAPON_DIVISION_GUN_MARTIAL'];
+        divisions.push('WEAPON_DIVISION_GUN_MARTIAL');
       } else if (category === 'advanced') {
-        return ['WEAPON_DIVISION_GUN', 'WEAPON_DIVISION_GUN_ADVANCED'];
-      } else {
-        return ['WEAPON_DIVISION_GUN'];
+        divisions.push('WEAPON_DIVISION_GUN_ADVANCED');
       }
     }
   }
 
-  return [];
+  // One-handed agile/finesse weapons (ex. SF2e Striker Operative specialization).
+  // "One-handed" counts anything wieldable in a single hand: 1, 1+, or 1 or 2.
+  const isOneHanded = ['1', '1+', '1 or 2'].includes(`${item.hands ?? ''}`.trim());
+  if (isOneHanded && (hasTraitType('AGILE', traitsIds) || hasTraitType('FINESSE', traitsIds))) {
+    divisions.push('WEAPON_DIVISION_ONE_HANDED_AGILE_FINESSE');
+  }
+
+  return divisions;
 }

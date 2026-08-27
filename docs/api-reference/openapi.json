@@ -156,6 +156,11 @@
         "properties": {
           "id": { "type": "integer" },
           "created_at": { "type": "string", "format": "date-time" },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Server-maintained change timestamp, bumped by a database trigger on every real edit. Lets clients detect content changes."
+          },
           "name": { "type": "string" },
           "description": { "type": "string" },
           "content_source_id": { "type": "integer" },
@@ -179,6 +184,11 @@
         "properties": {
           "id": { "type": "integer" },
           "created_at": { "type": "string", "format": "date-time" },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Server-maintained change timestamp, bumped by a database trigger on every real edit. Lets clients detect content changes."
+          },
           "name": { "type": "string" },
           "rank": { "type": "integer", "minimum": 0, "maximum": 10 },
           "traditions": { "type": "array", "items": { "type": "string" } },
@@ -207,6 +217,11 @@
         "properties": {
           "id": { "type": "integer" },
           "created_at": { "type": "string", "format": "date-time" },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Server-maintained change timestamp, bumped by a database trigger on every real edit. Lets clients detect content changes."
+          },
           "name": { "type": "string" },
           "price": {
             "type": "object",
@@ -240,6 +255,11 @@
         "properties": {
           "id": { "type": "integer" },
           "created_at": { "type": "string", "format": "date-time" },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Server-maintained change timestamp, bumped by a database trigger on every real edit. Lets clients detect content changes."
+          },
           "operations": { "type": "array", "items": { "$ref": "#/components/schemas/Operation" } },
           "name": { "type": "string" },
           "actions": { "$ref": "#/components/schemas/ActionCost" },
@@ -267,6 +287,11 @@
         "properties": {
           "id": { "type": "integer" },
           "created_at": { "type": "string", "format": "date-time" },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Server-maintained change timestamp, bumped by a database trigger on every real edit. Lets clients detect content changes."
+          },
           "name": { "type": "string" },
           "rarity": { "$ref": "#/components/schemas/Rarity" },
           "description": { "type": "string" },
@@ -283,6 +308,11 @@
         "properties": {
           "id": { "type": "integer" },
           "created_at": { "type": "string", "format": "date-time" },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Server-maintained change timestamp, bumped by a database trigger on every real edit. Lets clients detect content changes."
+          },
           "name": { "type": "string" },
           "rarity": { "$ref": "#/components/schemas/Rarity" },
           "description": { "type": "string" },
@@ -297,6 +327,11 @@
         "properties": {
           "id": { "type": "integer" },
           "created_at": { "type": "string", "format": "date-time" },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Server-maintained change timestamp, bumped by a database trigger on every real edit. Lets clients detect content changes."
+          },
           "name": { "type": "string" },
           "rarity": { "$ref": "#/components/schemas/Rarity" },
           "description": { "type": "string" },
@@ -314,6 +349,11 @@
         "properties": {
           "id": { "type": "integer" },
           "created_at": { "type": "string", "format": "date-time" },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Server-maintained change timestamp, bumped by a database trigger on every real edit. Lets clients detect content changes."
+          },
           "class_id": { "type": "integer" },
           "archetype_id": { "type": "integer" },
           "name": { "type": "string" },
@@ -346,6 +386,11 @@
         "properties": {
           "id": { "type": "integer" },
           "created_at": { "type": "string", "format": "date-time" },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Server-maintained change timestamp, bumped by a database trigger on every real edit. Lets clients detect content changes."
+          },
           "name": { "type": "string" },
           "rarity": { "$ref": "#/components/schemas/Rarity" },
           "description": { "type": "string" },
@@ -362,6 +407,11 @@
         "properties": {
           "id": { "type": "integer" },
           "created_at": { "type": "string", "format": "date-time" },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Server-maintained change timestamp, bumped by a database trigger on every real edit. Lets clients detect content changes."
+          },
           "name": { "type": "string" },
           "rarity": { "$ref": "#/components/schemas/Rarity" },
           "description": { "type": "string" },
@@ -378,6 +428,11 @@
         "properties": {
           "id": { "type": "integer" },
           "created_at": { "type": "string", "format": "date-time" },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Server-maintained change timestamp, bumped by a database trigger on every real edit. Lets clients detect content changes."
+          },
           "name": { "type": "string" },
           "speakers": { "type": "string" },
           "script": { "type": "string" },
@@ -393,6 +448,11 @@
         "properties": {
           "id": { "type": "integer" },
           "created_at": { "type": "string", "format": "date-time" },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Server-maintained change timestamp, bumped by a database trigger on every real edit. Lets clients detect content changes."
+          },
           "name": { "type": "string" },
           "level": { "type": "integer" },
           "rarity": { "$ref": "#/components/schemas/Rarity" },
@@ -511,6 +571,11 @@
         "properties": {
           "id": { "type": "integer" },
           "created_at": { "type": "string", "format": "date-time" },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Server-maintained change timestamp, bumped by a database trigger on every real edit. Lets clients detect content changes."
+          },
           "name": { "type": "string" },
           "foundry_id": { "type": "string" },
           "url": { "type": "string" },
@@ -1921,7 +1986,7 @@
       "post": {
         "tags": ["Characters"],
         "summary": "Update an existing character",
-        "description": "Same body shape as `create-character` but `id` is required. Forbidden keys (`id`, `created_at`, `content_source_id`, `user_id`) are stripped server-side.",
+        "description": "Same body shape as `create-character` but `id` is required. Forbidden keys (`id`, `created_at`, `content_source_id`, `user_id`) are stripped server-side.\n\n**Optimistic concurrency:** pass `expected_updated_at` (the `updated_at` value from your last read of the character) to make the write conditional. If the row changed since, the write is NOT applied and the response data is `{ \"__conflict\": true, \"character\": <current row> }` so you can merge and retry with the fresh `updated_at`. If your session can read but not write the character (e.g. viewing someone else's public character), the response data is `{ \"__forbidden\": true, \"reason\": \"WRITE_DENIED\" | \"NOT_VISIBLE\" }` — stop retrying; the write will never be accepted. Omitting `expected_updated_at` keeps the legacy unconditional write behavior.",
         "operationId": "updateCharacter",
         "requestBody": {
           "required": true,
@@ -1930,7 +1995,17 @@
               "schema": {
                 "allOf": [
                   { "$ref": "#/components/schemas/Character" },
-                  { "type": "object", "required": ["id"] }
+                  {
+                    "type": "object",
+                    "required": ["id"],
+                    "properties": {
+                      "expected_updated_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "description": "Optimistic-concurrency token: the character's `updated_at` from your last read. When provided, the update only applies if the row is unchanged."
+                      }
+                    }
+                  }
                 ]
               }
             }
@@ -1938,7 +2013,7 @@
         },
         "responses": {
           "200": {
-            "description": "JSend success.",
+            "description": "JSend success. With `expected_updated_at`, `data` may instead be a conflict object (`__conflict` + current `character`) or a forbidden object (`__forbidden` + `reason`).",
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/JSendBoolean" } }
             }
@@ -2503,6 +2578,59 @@
         }
       }
     },
+    "/get-content-versions": {
+      "post": {
+        "tags": ["Content"],
+        "summary": "Get content source change tokens",
+        "description": "Returns the server-maintained `updated_at` change token for each requested content source. Clients that persist the content corpus locally compare these tokens against their cached copies on page load and refetch when any differ. The response is intentionally minimal (id and updated_at only) so warm-cache page loads stay cheap.",
+        "operationId": "getContentVersions",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["ids"],
+                "properties": {
+                  "ids": {
+                    "type": "array",
+                    "items": { "type": "integer" },
+                    "minItems": 1,
+                    "maxItems": 500,
+                    "description": "Content source ids to check (at most 500)."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "JSend success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": { "type": "string", "enum": ["success"] },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": { "type": "integer" },
+                          "updated_at": { "type": "string", "format": "date-time" }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/search-data": {
       "post": {
         "tags": ["Search"],
@@ -2713,7 +2841,7 @@
       "post": {
         "tags": ["Integrations"],
         "summary": "(Discord webhook) Approve, reject, or vote on a content update",
-        "description": "Service-to-service webhook for the WG Discord moderation bot. Authenticates via the shared `CONTENT_UPDATE_KEY` secret in the `Authorization: Bearer <secret>` header (NOT a user JWT or API key). When state=APPROVE, applies the underlying content change.",
+        "description": "Service-to-service webhook for the WG Discord moderation bot. Authenticates via the shared `CONTENT_UPDATE_KEY` secret, preferably in the `Authorization: Bearer <secret>` header (NOT a user JWT or API key); the legacy `auth_token` body field is also accepted for older bot deployments. When state=APPROVE, applies the underlying content change.",
         "operationId": "updateContentUpdate",
         "security": [],
         "requestBody": {
@@ -2724,6 +2852,7 @@
                 "type": "object",
                 "required": ["discord_msg_id", "discord_user_id", "discord_user_name", "state"],
                 "properties": {
+                  "auth_token": { "type": "string", "description": "Legacy transport for the shared secret; prefer the Authorization header." },
                   "discord_msg_id": { "type": "string" },
                   "discord_user_id": { "type": "string" },
                   "discord_user_name": { "type": "string" },

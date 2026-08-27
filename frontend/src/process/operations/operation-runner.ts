@@ -32,11 +32,18 @@ import {
   addVariable,
   addVariableBonus,
   adjVariable,
+  getLevelCappedProficiencyType,
   getVariable,
   getVariables,
   setVariable,
 } from '@variables/variable-manager';
-import { compileProficiencyType, labelToVariable, maxProficiencyType } from '@variables/variable-utils';
+import {
+  compileProficiencyType,
+  getProficiencyTypeValue,
+  isProficiencyType,
+  labelToVariable,
+  maxProficiencyType,
+} from '@variables/variable-utils';
 import {
   ObjectWithUUID,
   determineFilteredSelectionList,
@@ -406,12 +413,31 @@ async function updateVariables(
     }
   } else if (operation.data.optionType === 'ADJ_VALUE') {
     adjVariable(varId, selectedOption.variable, selectedOption.value, sourceLabel);
+    // addToFamiliarity selections (Unconventional Weaponry): the chosen weapon also joins
+    // WEAPON_FAMILIARITY, so its proficiency tracks one category lower (see weapon-handler).
+    if (
+      operation.data.optionsFilters?.type === 'ADJ_VALUE' &&
+      operation.data.optionsFilters.addToFamiliarity &&
+      selectedOption.name
+    ) {
+      adjVariable(varId, 'WEAPON_FAMILIARITY', selectedOption.name, sourceLabel);
+    }
   } else if (operation.data.optionType === 'CUSTOM') {
     // Doesn't inherently do anything, just runs its operations
   }
 }
 
-function isTrainedInAdjValue(varId: StoreID, operation: OperationAdjValue): boolean {
+/**
+ * Determines whether a skill training grant (adjValue to 'T') should be redirected to a
+ * "Select a Skill to be Trained" selection because the character is already trained in it,
+ * per the PF2e rule "if you were already trained in this skill, you instead become trained
+ * in a skill of your choice."
+ * @param varId - Variable store ID
+ * @param operation - The adjValue operation being executed
+ * @param options - Operation options for the current execution round
+ * @returns - Whether the grant should be redirected to a skill selection
+ */
+function isTrainedInAdjValue(varId: StoreID, operation: OperationAdjValue, options?: OperationOptions): boolean {
   if (!operation.data.variable.includes('SKILL_')) {
     // Not a skill adjustment
     return false;
@@ -427,7 +453,12 @@ function isTrainedInAdjValue(varId: StoreID, operation: OperationAdjValue): bool
 
   // If character is at least trained in skill, give another skill selection
   let variable = getVariables(varId)[operation.data.variable] as VariableProf;
-  const currentProf = compileProficiencyType(variable.value);
+  // Conditional branches only execute in the conditional round, after every numeric skill
+  // increase from every level has already been applied. Compiling increases here would count
+  // increases that are meant to stack on top of this very grant (e.g. a swashbuckler style's
+  // level-1 training + a level-3 skill increase), wrongly treating the character as "already
+  // trained". So inside conditionals, only base rank grants (background, class, etc.) count.
+  const currentProf = options?.doConditionals ? variable.value.value : compileProficiencyType(variable.value);
   return maxProficiencyType(currentProf, 'T') === currentProf;
 }
 
@@ -438,7 +469,7 @@ async function runAdjValue(
   options?: OperationOptions,
   sourceLabel?: string
 ): Promise<OperationResult> {
-  const isTrained = isTrainedInAdjValue(varId, operation);
+  const isTrained = isTrainedInAdjValue(varId, operation, options);
   // If character is at least trained in skill, give another skill selection
   if (isTrained) {
     const subNode = selectionTrack.node?.children[operation.id];
@@ -480,18 +511,47 @@ async function runSetValue(
   return null;
 }
 
+/**
+ * Variable bindings queued during execution, resolved once every round has run.
+ * Bindings copy another variable's FINAL value (e.g. Quick Climb's "climb Speed equal
+ * to your land Speed"), so they can't resolve mid-execution — and the old setTimeout
+ * deferral was lost entirely under worker execution, because the store is exported
+ * back to the main thread before the timer ever fires.
+ */
+let pendingBinds: {
+  varId: StoreID;
+  variable: string;
+  value: OperationBindValue['data']['value'];
+  sourceLabel?: string;
+}[] = [];
+
+/** Drops queued bindings from a previous (possibly aborted) execution. */
+export function clearPendingBinds() {
+  pendingBinds = [];
+}
+
+/** Applies all queued bindings against the now-final variable stores. */
+export function resolvePendingBinds() {
+  for (const bind of pendingBinds) {
+    const bindValue = getVariable(bind.value.storeId, bind.value.variable);
+    if (bindValue) {
+      setVariable(bind.varId, bind.variable, bindValue.value, bind.sourceLabel);
+    }
+  }
+  pendingBinds = [];
+}
+
 async function runBindValue(
   varId: StoreID,
   operation: OperationBindValue,
   sourceLabel?: string
 ): Promise<OperationResult> {
-  // On outside process
-  setTimeout(() => {
-    const bindValue = getVariable(operation.data.value.storeId, operation.data.value.variable);
-    if (bindValue) {
-      setVariable(varId, operation.data.variable, bindValue.value, sourceLabel);
-    }
-  }, 1);
+  pendingBinds.push({
+    varId,
+    variable: operation.data.variable,
+    value: operation.data.value,
+    sourceLabel,
+  });
   return null;
 }
 
@@ -943,6 +1003,23 @@ async function runConditional(
   options?: OperationOptions,
   sourceLabel?: string
 ): Promise<OperationResult> {
+  // Proficiency variables this conditional would GRANT a rank letter to, in either branch.
+  // A condition checking one of these is a self-guard ("if not yet expert, become expert"):
+  // it must evaluate against the rank the character has from grants alone. Numeric skill
+  // increases run before the conditional round, so an increase-inclusive read lets an
+  // increase meant to stack ABOVE the grant satisfy the guard instead — the grant never
+  // fires and the increase is consumed reaching the rank the grant should have provided
+  // (Medic Dedication at trained + a level-7 increase compiled to expert, not master).
+  // Threshold conditions that gate anything else keep the increase-inclusive read below.
+  const selfGrantProfVars = new Set(
+    [...(operation.data.trueOperations ?? []), ...(operation.data.falseOperations ?? [])]
+      .filter(
+        (op): op is OperationAdjValue =>
+          op.type === 'adjValue' && isProficiencyType((op.data.value as { value?: unknown })?.value)
+      )
+      .map((op) => op.data.variable)
+  );
+
   const makeCheck = (check: ConditionCheckData) => {
     let variable = getVariable(varId, check.name);
 
@@ -957,7 +1034,11 @@ async function runConditional(
       // if (!variable) {
       //   return false;
       // }
-      return false;
+
+      // An absent variable can't equal or include anything, so negated checks pass
+      // (e.g. a muse feature's MAIN_BARD_MUSE ≠ 'enigma' should hold when the store
+      // never created MAIN_BARD_MUSE at all). Every other operator stays false.
+      return check.operator === 'NOT_EQUALS' || check.operator === 'NOT_INCLUDES';
     }
 
     if (variable.type === 'attr') {
@@ -1032,23 +1113,34 @@ async function runConditional(
         return !varValue.map((v) => labelToVariable(v)).includes(labelToVariable(`${check.value}`));
       }
     } else if (variable.type === 'prof') {
-      const profType = compileProficiencyType(variable.value);
+      // Level-capped compile: conditionals execute before normalizeProficiencies
+      // runs, so a plain compile here could read a rank the normalization will clamp
+      // away (rank grant + spent increases) and misfire high-rank checks like Ward
+      // Medic's "legendary in Medicine". The cap keeps in-execution checks
+      // consistent with the final displayed rank.
+      // Self-guards (this conditional grants a rank to the very variable it checks)
+      // instead read the grant-only rank — see selfGrantProfVars above.
+      const profType = selfGrantProfVars.has(variable.name)
+        ? variable.value.value
+        : getLevelCappedProficiencyType(varId, variable);
+      // Compare by rank order. The strict operators must actually be strict: the
+      // condition editor offers < and ≤ as distinct options, and content depends on
+      // the difference (e.g. Virtuosic Performer's "+2 if master" else-branch only
+      // fires when the rank is NOT below master). The old maxProficiencyType-based
+      // checks returned true on equality for both < and >.
+      const rankOf = (prof: ProficiencyType) => getProficiencyTypeValue(prof);
       if (check.operator === 'EQUALS') {
         return profType === check.value;
       } else if (check.operator === 'GREATER_THAN') {
-        const bestProf = maxProficiencyType(profType, check.value as ProficiencyType);
-        return bestProf === profType;
+        return rankOf(profType) > rankOf(check.value as ProficiencyType);
       } else if (check.operator === 'LESS_THAN') {
-        const bestProf = maxProficiencyType(profType, check.value as ProficiencyType);
-        return bestProf === check.value;
+        return rankOf(profType) < rankOf(check.value as ProficiencyType);
       } else if (check.operator === 'NOT_EQUALS') {
         return profType !== check.value;
       } else if (check.operator === 'GREATER_THAN_OR_EQUALS') {
-        const bestProf = maxProficiencyType(profType, check.value as ProficiencyType);
-        return bestProf === profType || profType === check.value;
+        return rankOf(profType) >= rankOf(check.value as ProficiencyType);
       } else if (check.operator === 'LESS_THAN_OR_EQUALS') {
-        const bestProf = maxProficiencyType(profType, check.value as ProficiencyType);
-        return bestProf === check.value || profType === check.value;
+        return rankOf(profType) <= rankOf(check.value as ProficiencyType);
       }
     }
     return false;

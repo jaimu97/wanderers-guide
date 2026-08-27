@@ -17,7 +17,7 @@ const SUPABASE_URL =
 const SERVICE_ROLE_KEY =
   Deno.env.get('SERVICE_ROLE_KEY') ?? Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 
-const ANON_KEY =
+export const ANON_KEY =
   Deno.env.get('PUBLIC_ANON_KEY') ??
   Deno.env.get('ANON_KEY') ??
   Deno.env.get('SUPABASE_ANON_KEY') ??
@@ -130,12 +130,33 @@ export async function callFunction(
   };
   if (opts?.token) headers['Authorization'] = `Bearer ${opts.token}`;
 
-  const res = await fetch(`${FUNCTIONS_URL}/${name}`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body ?? {}),
-  });
-  const text = await res.text();
+  // Each edge function gets its own worker, cold-started on first invocation. On a
+  // loaded CI runner that first call can 5xx with a boot error even though the stack
+  // is healthy, which made e2e flaky (a test would fail on whichever function it hit
+  // first). Retry 5xx a couple times with a pause; real assertions run on the reply.
+  // A dying cold worker can also cut the connection mid-response, which surfaces as a
+  // THROWN TypeError from fetch()/res.text() rather than a 5xx status ("error reading
+  // a body from connection") — treat that exactly like a boot 5xx and retry it too.
+  const MAX_TRIES = 3;
+  let res: Response = undefined as unknown as Response;
+  let text = '';
+  for (let attempt = 1; attempt <= MAX_TRIES; attempt++) {
+    try {
+      res = await fetch(`${FUNCTIONS_URL}/${name}`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body ?? {}),
+      });
+      text = await res.text();
+    } catch (err) {
+      if (attempt === MAX_TRIES) throw err;
+      await new Promise((r) => setTimeout(r, 1500 * attempt));
+      continue;
+    }
+    if (res.status < 500 || attempt === MAX_TRIES) break;
+    await new Promise((r) => setTimeout(r, 1500 * attempt));
+  }
+
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);

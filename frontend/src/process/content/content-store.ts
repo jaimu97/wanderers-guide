@@ -144,9 +144,15 @@ function setStoredIds(type: ContentType, data: Record<string, any>, value: any) 
 
 const CONTENT_CACHE_KEY = 'content-store';
 // Bump to invalidate every client's persisted cache (e.g. when the content shape changes).
-const CONTENT_CACHE_VERSION = 1;
-// How long a persisted cache is trusted before it's dropped and re-fetched. Content changes
-// rarely; this bounds how stale a cached client can be (and resetContentStore() clears it on demand).
+// v2: source rows carry the updated_at change token; v1 blobs predate it and would fail
+// every freshness check, so retire them once via the version gate instead.
+// v3: fetchData previously paginated without an ORDER BY, so any multi-chunk fetch (items,
+// ability blocks) could persist a silently partial corpus that the change-token check then
+// verified as fresh forever. Retire every possibly-partial blob now that pagination is stable.
+const CONTENT_CACHE_VERSION = 3;
+// Backstop only: staleness is normally caught by the per-source change-token check against
+// get-content-versions on load (see verifyPersistedContentVersions). The TTL exists for the
+// cases where that check cannot run (offline, endpoint unreachable, >500 sources).
 const CONTENT_CACHE_TTL_MS = 1000 * 60 * 60 * 24; // 24h
 
 type PersistedContentCache = {
@@ -160,6 +166,52 @@ type PersistedContentCache = {
 // lookups share a single in-flight request instead of each hitting the network.
 const inFlightFetches = new Map<string, Promise<any>>();
 
+// One freshness verdict per page load. resetContentStore() re-arms hydration (App mount
+// plus several pages call it), so without memoization every re-hydration would fire its
+// own network check — and a re-hydration racing an in-flight 'stale' verdict could fill
+// the stores from a blob the check is about to condemn. Blobs persisted during THIS page
+// lifetime (savedAt >= PAGE_LOAD_AT) are fresh-from-network by construction and skip the
+// check entirely.
+const PAGE_LOAD_AT = Date.now();
+let versionCheckPromise: Promise<'ok' | 'stale'> | null = null;
+
+/**
+ * Compare a persisted blob's per-source change tokens against the server.
+ *
+ * Each cached content-source row carries `updated_at` — a token the DB bumps whenever
+ * that source OR any content inside it changes (migration 20260718000000). One tiny
+ * request (~5 KB) answers "did anything I cached change?" without downloading content.
+ *
+ * Fail-open by design: if the check cannot run or errors (offline, endpoint not yet
+ * deployed, migration not yet applied), the cache is trusted and the TTL remains the
+ * backstop — this is what makes every rollout order safe. A cached source with NO token
+ * (pre-migration blob) compares as `undefined` vs a server string and reads as stale.
+ */
+async function verifyPersistedContentVersions(rec: PersistedContentCache): Promise<'ok' | 'stale'> {
+  const sourceMap = rec.idStore instanceof Map ? rec.idStore.get('content-source') : undefined;
+  const sources = sourceMap instanceof Map ? ([...sourceMap.values()].filter(isTruthy) as ContentSource[]) : [];
+  // Nothing to compare against (or too many for one call): fall back to the TTL.
+  if (sources.length === 0 || sources.length > 500) return 'ok';
+
+  const result = await makeRequest<{ id: number; updated_at: string }[]>(
+    'get-content-versions',
+    { ids: sources.map((s) => s.id) },
+    false
+  );
+  if (!Array.isArray(result)) return 'ok';
+
+  const serverTokens = new Map(result.map((r) => [r.id, r.updated_at]));
+  for (const source of sources) {
+    // Missing on the server = the source was deleted; token mismatch = something in it
+    // changed. Raw string comparison on purpose — tokens are opaque, never date-parsed.
+    if (serverTokens.get(source.id) !== source.updated_at) {
+      console.log('[CONTENT-CACHE] Source', source.id, 'changed on the server; dropping persisted cache');
+      return 'stale';
+    }
+  }
+  return 'ok';
+}
+
 async function hydrateContentCache(): Promise<void> {
   try {
     const rec = await idbGet<PersistedContentCache>(CONTENT_CACHE_KEY);
@@ -167,6 +219,21 @@ async function hydrateContentCache(): Promise<void> {
     if (rec.version !== CONTENT_CACHE_VERSION || Date.now() - rec.savedAt > CONTENT_CACHE_TTL_MS) {
       await idbDelete(CONTENT_CACHE_KEY);
       return;
+    }
+    // Freshness gate: only hydrate a blob from a previous page load after its change
+    // tokens check out against the server (see verifyPersistedContentVersions).
+    if (rec.savedAt < PAGE_LOAD_AT) {
+      versionCheckPromise ??= verifyPersistedContentVersions(rec);
+      if ((await versionCheckPromise) === 'stale') {
+        // Re-read before deleting: a slow check can lose the race against a fresh
+        // persist (network fetch + the 10s debounce), and deleting THAT blob would
+        // force a pointless cold load on the next visit.
+        const current = await idbGet<PersistedContentCache>(CONTENT_CACHE_KEY);
+        if (current && current.savedAt === rec.savedAt) {
+          await idbDelete(CONTENT_CACHE_KEY);
+        }
+        return;
+      }
     }
     // Fill the in-memory maps WITHOUT overwriting anything already present. Hydration can
     // resolve after a network fetch has already populated fresher data (it races a 2.5s
@@ -207,11 +274,15 @@ async function persistContentCache(): Promise<void> {
   if (!cacheDirty) return;
   cacheDirty = false;
   try {
+    // Never persist an empty list result: a full-corpus fetch that returned [] is a failure
+    // artifact (network error, interrupted load), and once persisted it would be served as
+    // the real corpus until the version/TTL gates retire it.
+    const filteredContentStore = new Map([...contentStore].filter(([, v]) => !(Array.isArray(v) && v.length === 0)));
     await idbSet(CONTENT_CACHE_KEY, {
       version: CONTENT_CACHE_VERSION,
       savedAt: Date.now(),
       idStore,
-      contentStore,
+      contentStore: filteredContentStore,
     } satisfies PersistedContentCache);
   } catch (e) {
     cacheDirty = true; // retry on the next schedule
@@ -274,6 +345,25 @@ export function getDefaultSources(view: SourceKey) {
   } else {
     return cloneDeep(DEFAULT_SOURCES[view]);
   }
+}
+
+/**
+ * A stable, serializable fingerprint of the current default sources for a view, for use in
+ * react-query queryKeys.
+ *
+ * The default sources are module-level mutable state (see defineDefaultSources), so any
+ * queryFn that fetches content scoped by getDefaultSources(view) MUST include this value in
+ * its queryKey. A key without it pins the first-fetched corpus for the cache lifetime: after
+ * some page narrows the scope (e.g. ContentFeedbackModal scoping INFO to a single book),
+ * every other consumer of that key silently gets the narrowed corpus — pickers showing the
+ * wrong set of books depending on page-visit order.
+ *
+ * Array scopes are sorted before serializing so the same set of source ids produces the same
+ * fingerprint regardless of the order the sources were enabled in.
+ */
+export function getDefaultSourcesKey(view: SourceKey): string {
+  const sources = getDefaultSources(view);
+  return Array.isArray(sources) ? [...sources].sort((a, b) => a - b).join(',') : sources;
 }
 
 /**
@@ -373,6 +463,16 @@ export async function fetchContent<T = Record<string, any>>(
     spell: 'find-spell',
     trait: 'find-trait',
   };
+
+  // Runtime guard: TypeScript can't stop a caller passing a drawer type or an
+  // ability-block subtype ('feat', 'action', ...) that isn't a real ContentType.
+  // The map lookup below then yields undefined and the request literally went to
+  // `/functions/v1/undefined` in prod. Fail loudly and locally instead — the fix
+  // at the call site is convertToContentType().
+  if (!FETCH_REQUEST_MAP[type]) {
+    console.error(`[CONTENT-STORE] fetchContent called with unknown content type '${type}'`, data);
+    return [] as T[];
+  }
 
   // Make sure any cache persisted by a previous session/tab is loaded before we check the
   // in-memory stores, so a reload can hit the cache instead of re-fetching from the network.
@@ -576,7 +676,24 @@ export async function fetchContentSources(sources: SourceValue) {
     );
   }
 
-  return results.sort((a, b) => a.name.localeCompare(b.name));
+  return results.sort((a, b) => (a.name ?? '').localeCompare(b.name ?? ''));
+}
+
+/**
+ * True when a content package came back effectively empty — i.e. the core content
+ * tables (ancestries/classes/items/traits) all failed to load. The global content
+ * corpus is never legitimately empty for a real source set, so this reliably means
+ * the fetch failed (network/edge/DNS) rather than "the user genuinely has no content."
+ * Used to refuse mounting the sheet/builder — and to refuse auto-saving — against a
+ * corpus that isn't there, which would otherwise wipe the character (see issue #235).
+ */
+export function isContentPackageEmpty(content: ContentPackage): boolean {
+  return (
+    content.ancestries.length === 0 &&
+    content.classes.length === 0 &&
+    content.items.length === 0 &&
+    content.traits.length === 0
+  );
 }
 
 export async function fetchContentPackage(
@@ -603,18 +720,18 @@ export async function fetchContentPackage(
   ]);
 
   const p = {
-    ancestries: ((content[0] ?? []) as Ancestry[]).sort((a, b) => a.name.localeCompare(b.name)),
-    backgrounds: ((content[1] ?? []) as Background[]).sort((a, b) => a.name.localeCompare(b.name)),
-    classes: ((content[2] ?? []) as Class[]).sort((a, b) => a.name.localeCompare(b.name)),
-    abilityBlocks: ((content[3] ?? []) as AbilityBlock[]).sort((a, b) => a.name.localeCompare(b.name)),
-    items: ((content[4] ?? []) as Item[]).sort((a, b) => a.name.localeCompare(b.name)),
-    languages: ((content[5] ?? []) as Language[]).sort((a, b) => a.name.localeCompare(b.name)),
-    spells: ((content[6] ?? []) as Spell[]).sort((a, b) => a.name.localeCompare(b.name)),
-    traits: ((content[7] ?? []) as Trait[]).sort((a, b) => a.name.localeCompare(b.name)),
-    creatures: ((content[8] ?? []) as Creature[]).sort((a, b) => a.name.localeCompare(b.name)),
-    archetypes: ((content[9] ?? []) as Archetype[]).sort((a, b) => a.name.localeCompare(b.name)),
-    versatileHeritages: ((content[10] ?? []) as VersatileHeritage[]).sort((a, b) => a.name.localeCompare(b.name)),
-    classArchetypes: ((content[11] ?? []) as ClassArchetype[]).sort((a, b) => a.name.localeCompare(b.name)),
+    ancestries: ((content[0] ?? []) as Ancestry[]).sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '')),
+    backgrounds: ((content[1] ?? []) as Background[]).sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '')),
+    classes: ((content[2] ?? []) as Class[]).sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '')),
+    abilityBlocks: ((content[3] ?? []) as AbilityBlock[]).sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '')),
+    items: ((content[4] ?? []) as Item[]).sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '')),
+    languages: ((content[5] ?? []) as Language[]).sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '')),
+    spells: ((content[6] ?? []) as Spell[]).sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '')),
+    traits: ((content[7] ?? []) as Trait[]).sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '')),
+    creatures: ((content[8] ?? []) as Creature[]).sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '')),
+    archetypes: ((content[9] ?? []) as Archetype[]).sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '')),
+    versatileHeritages: ((content[10] ?? []) as VersatileHeritage[]).sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '')),
+    classArchetypes: ((content[11] ?? []) as ClassArchetype[]).sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '')),
     sources: content[12] as ContentSource[],
     defaultSources: {
       PAGE: getDefaultSources('PAGE'),
@@ -754,5 +871,9 @@ function validateAndWarn<T>(type: ContentType, schema: z.ZodTypeAny, record: unk
       `[CONTENT-SCHEMA] ${type} id=${(record as any)?.id ?? '?'} "${(record as any)?.name ?? ''}" — ${summary}`
     );
   }
-  return parsed.success ? (parsed.data as T) : (record as T);
+  // On schema failure we keep the record (so we never silently hide content), but we
+  // guarantee a string `name` so downstream sorts and content-link resolution can never
+  // deref null — this retires the whole class of null-name .localeCompare / .toLowerCase
+  // crashes at the cache boundary instead of guarding each render site.
+  return parsed.success ? (parsed.data as T) : ({ ...(record as any), name: (record as any)?.name ?? '' } as T);
 }

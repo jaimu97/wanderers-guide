@@ -6,7 +6,14 @@ import RichText from '@common/RichText';
 import ResultWrapper from '@common/operations/results/ResultWrapper';
 import { SelectContentButton, selectContent } from '@common/select/SelectContent';
 import { IMPRINT_BG_COLOR, IMPRINT_BG_COLOR_HOVER, IMPRINT_BORDER_COLOR } from '@constants/data';
-import { fetchContent, fetchContentPackage, fetchContentSources, getDefaultSources } from '@content/content-store';
+import {
+  fetchContent,
+  fetchContentPackage,
+  fetchContentSources,
+  getDefaultSources,
+  getDefaultSourcesKey,
+  isContentPackageEmpty,
+} from '@content/content-store';
 import { getIconFromContentType } from '@content/content-utils';
 import classes from '@css/FaqSimple.module.css';
 import { AncestryInitialOverview, convertAncestryOperationsIntoUI } from '@drawers/types/AncestryDrawer';
@@ -68,8 +75,11 @@ export default function CharBuilderCreation(props: { characterId: number; pageHe
   const theme = useMantineTheme();
   const [doneLoading, setDoneLoading] = useState(false);
 
-  const { data: content, isFetching } = useQuery({
-    queryKey: [`find-content-${props.characterId}-for-char-builder-creation`, { characterId: props.characterId }],
+  const { data: content, isFetching, refetch } = useQuery({
+    queryKey: [
+      `find-content-${props.characterId}-for-char-builder-creation`,
+      { characterId: props.characterId, sources: getDefaultSourcesKey('PAGE') },
+    ],
     queryFn: async () => {
       // Prefetch content sources (to avoid multiple requests)
       await fetchContentSources(getDefaultSources('PAGE'));
@@ -105,8 +115,33 @@ export default function CharBuilderCreation(props: { characterId: number; pageHe
     </Box>
   );
 
+  const loadError = (
+    <Box
+      style={{
+        width: '100%',
+        height: '300px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      <Stack align='center' gap='xs' maw={380} px='md'>
+        <Text fw={600}>Couldn't load game content</Text>
+        <Text size='sm' c='dimmed' ta='center'>
+          The content library didn't load, so the builder stayed closed to avoid saving your character against
+          missing data. Check your connection and try again.
+        </Text>
+        <Button onClick={() => refetch()}>Retry</Button>
+      </Stack>
+    </Box>
+  );
+
   if (isFetching || !content) {
     return loader;
+  } else if (isContentPackageEmpty(content)) {
+    // Resolved-but-empty corpus = failed fetch. Don't mount the builder against no
+    // content (it would degrade the character and the auto-save would persist it, #235).
+    return loadError;
   } else {
     return (
       <>

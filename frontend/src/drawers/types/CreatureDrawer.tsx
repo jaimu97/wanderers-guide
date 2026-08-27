@@ -4,8 +4,15 @@ import { glassStyle } from '@utils/colors';
 import { DisplayIcon } from '@common/IconDisplay';
 import StatBlockSection from '@common/StatBlockSection';
 import { applyConditions } from '@conditions/condition-handler';
-import { fetchContentById, fetchContentPackage, fetchTraits, getDefaultSources } from '@content/content-store';
+import {
+  fetchContentById,
+  fetchContentPackage,
+  fetchTraits,
+  getDefaultSources,
+  getDefaultSourcesKey,
+} from '@content/content-store';
 import { getMetadataOpenedDict } from '@drawers/drawer-utils';
+import { displayError } from '@utils/notifications';
 import { addExtraItems, checkBulkLimit } from '@items/inv-handlers';
 import { applyEquipmentPenalties } from '@items/inv-utils';
 import {
@@ -54,6 +61,7 @@ import {
   IconAlignBoxLeftMiddle,
 } from '@tabler/icons-react';
 import { useQuery } from '@tanstack/react-query';
+import DrawerLoadState from '@drawers/DrawerLoadState';
 import { Creature, OperationCreatureResultPackage, Trait } from '@schemas/content';
 import { getAnchorStyles } from '@utils/anchor';
 import { determineCompanionType, findCreatureTraits } from '@utils/creature';
@@ -70,7 +78,7 @@ import { exportVariableStore } from '@variables/variable-manager';
 export function CreatureDrawerTitle(props: { data: { id?: number; creature?: Creature } }) {
   const id = props.data.id;
 
-  const { data: _creature } = useQuery({
+  const { data: _creature, isFetching, refetch } = useQuery({
     queryKey: [`find-creature-${id}`, { id }],
     queryFn: async ({ queryKey }) => {
       // @ts-ignore
@@ -121,8 +129,8 @@ export function CreatureDrawerContent(props: {
   });
   const view = props.data.readOnly ? 'BLOCK' : drawerData.view;
 
-  const { data: content } = useQuery({
-    queryKey: [`find-creature-details-${id}`, { id }],
+  const { data: content, isFetching, refetch } = useQuery({
+    queryKey: [`find-creature-details-${id}`, { id, sources: getDefaultSourcesKey('INFO') }],
     queryFn: async ({ queryKey }) => {
       // @ts-ignore
        
@@ -230,6 +238,19 @@ export function CreatureDrawerContent(props: {
         setLoading(false);
         refreshStatBlock();
       }, 100);
+    }).catch((error) => {
+      // A single malformed operation (e.g. a setValue whose value doesn't match its
+      // variable's type) rejects the whole execution in the operations worker. Without this
+      // catch `loading` stayed true forever while `isFetching` was false, so the drawer
+      // rendered "Couldn't load this content" — a connection error for what is really bad
+      // content data, with no way out short of editing the record in the database.
+      // Settle instead: render what the record does have and surface the real reason.
+      console.error(`Error: Failed to execute operations for creature ${creature.id}`, error);
+      displayError(`Couldn't compute "${creature.name}": ${error?.message ?? error}`);
+
+      executingOperations.current = false;
+      setLoading(false);
+      refreshStatBlock();
     });
   }, [creature, content]);
 
@@ -266,15 +287,7 @@ export function CreatureDrawerContent(props: {
 
   if (loading || !creature || !content) {
     return (
-      <Loader
-        type='bars'
-        style={{
-          position: 'absolute',
-          top: '35%',
-          left: '50%',
-          transform: 'translate(-50%, -50%)',
-        }}
-      />
+      <DrawerLoadState loading={isFetching} onRetry={refetch} />
     );
   }
 

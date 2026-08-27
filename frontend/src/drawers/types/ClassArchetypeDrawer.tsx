@@ -3,7 +3,7 @@ import RichText from '@common/RichText';
 import TraitsDisplay from '@common/TraitsDisplay';
 import { ClassFeatureSelectionOption, FeatSelectionOption } from '@common/select/SelectContent';
 import { isAbilityBlockVisible } from '@content/content-hidden';
-import { fetchContentAll, fetchContentById, getDefaultSources } from '@content/content-store';
+import { fetchContentAll, fetchContentById, getDefaultSources, getDefaultSourcesKey } from '@content/content-store';
 import ShowOperationsButton from '@drawers/ShowOperationsButton';
 import { getMetadataOpenedDict } from '@drawers/drawer-utils';
 import {
@@ -23,6 +23,7 @@ import {
 } from '@mantine/core';
 import { IconArrowRight, IconCheck } from '@tabler/icons-react';
 import { useQuery } from '@tanstack/react-query';
+import DrawerLoadState from '@drawers/DrawerLoadState';
 import { AbilityBlock, ClassArchetype } from '@schemas/content';
 import { toLabel } from '@utils/strings';
 import { groupBy } from 'lodash-es';
@@ -36,7 +37,7 @@ export function ClassArchetypeDrawerTitle(props: {
 
   const [_drawer, openDrawer] = useAtom(drawerState);
 
-  const { data: _archetype } = useQuery({
+  const { data: _archetype, isFetching, refetch } = useQuery({
     queryKey: [`find-class-archetype-${id}`, { id }],
     queryFn: async ({ queryKey }) => {
       // @ts-ignore
@@ -84,8 +85,8 @@ export function ClassArchetypeDrawerContent(props: {
 }) {
   const id = props.data.id;
 
-  const { data } = useQuery({
-    queryKey: [`find-class-archetype-details-${id}`, { id }],
+  const { data, isFetching, refetch } = useQuery({
+    queryKey: [`find-class-archetype-details-${id}`, { id, sources: getDefaultSourcesKey('INFO') }],
     queryFn: async ({ queryKey }) => {
       // @ts-ignore
        
@@ -148,7 +149,7 @@ export function ClassArchetypeDrawerContent(props: {
         <Stack gap={0}>
           <Divider color='dark.6' />
           {adjustments[level]
-            .sort((a, b) => a.type.localeCompare(b.type))
+            .sort((a, b) => (a.type ?? '').localeCompare(b.type ?? ''))
             .map((fa, index) => (
               <Box key={index}>
                 <Group justify='flex-start' wrap='nowrap' gap={5} p='sm'>
@@ -239,15 +240,7 @@ export function ClassArchetypeDrawerContent(props: {
 
   if (!data || !data.archetype || !data.abilityBlocks) {
     return (
-      <Loader
-        type='bars'
-        style={{
-          position: 'absolute',
-          top: '35%',
-          left: '50%',
-          transform: 'translate(-50%, -50%)',
-        }}
-      />
+      <DrawerLoadState loading={isFetching} onRetry={refetch} />
     );
   }
 

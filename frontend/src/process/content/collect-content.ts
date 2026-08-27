@@ -35,7 +35,7 @@ export function collectEntityAbilityBlocks(
           return a.level - b.level;
         }
       }
-      return a.name.localeCompare(b.name);
+      return (a.name ?? '').localeCompare(b.name ?? '');
     });
 
   const generalAndSkillFeats = feats.filter((feat) => {
@@ -98,10 +98,10 @@ export function collectEntityAbilityBlocks(
           return a.level - b.level;
         }
       }
-      return a.name.localeCompare(b.name);
+      return (a.name ?? '').localeCompare(b.name ?? '');
     }),
-    physicalFeatures: physicalFeatures.sort((a, b) => a.name.localeCompare(b.name)),
-    heritages: heritages.sort((a, b) => a.name.localeCompare(b.name)),
+    physicalFeatures: physicalFeatures.sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '')),
+    heritages: heritages.sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '')),
     // For creature:
     baseAbilities: isCreature(entity) ? (entity.abilities_base ?? []) : [],
     addedAbilities: isCreature(entity)
@@ -196,7 +196,12 @@ export function collectEntitySpellcasting(id: StoreID, entity: LivingEntity) {
       focus.push({
         spell_id: spellData.spellId,
         source: spellData.castingSource ?? '',
-        rank: spellData.rank ?? 0,
+        // Keep an unset rank unset. Content marks focus CANTRIPS with an explicit `rank: 0`
+        // (e.g. bard compositions); most focus spells are granted without a rank because they
+        // auto-heighten. Collapsing unset to 0 made every rank-less grant read as a cantrip,
+        // and getFocusPoints excludes cantrips — so those spells stopped counting toward the
+        // focus pool (sheet, rest reset, and PDF export all undercounted).
+        rank: spellData.rank ?? undefined,
       });
     } else if (spellData.type === 'INNATE') {
       innate.push({
@@ -233,9 +238,9 @@ export function collectEntitySpellcasting(id: StoreID, entity: LivingEntity) {
       })
       .sort((a, b) => {
         if (a.type !== b.type) {
-          return b.type.localeCompare(a.type);
+          return (b.type ?? '').localeCompare(a.type ?? '');
         }
-        return a.name.localeCompare(b.name);
+        return (a.name ?? '').localeCompare(b.name ?? '');
       }),
   };
 }
@@ -244,9 +249,13 @@ export function getFocusPoints(id: StoreID, entity: LivingEntity, focusSpells: R
   const fromSpells = focusSpells.filter((f) => f?.rank !== 0).length ?? 0;
   const extra = getVariable<VariableNum>(id, 'FOCUS_POINT_BONUS')?.value ?? 0;
 
-  const maxFocusPoints = Math.min(fromSpells + extra, 3);
+  // Clamp: FOCUS_POINT_BONUS can be negative, and a retrain can leave a stored current
+  // above a reduced max — both would push a negative/NaN into the focus-point token
+  // control (RangeError, #234) or render a negative "expended" count (#31).
+  const maxFocusPoints = Math.max(0, Math.min(fromSpells + extra, 3));
+  const storedCurrent = entity.spells?.focus_point_current ?? maxFocusPoints;
   return {
-    current: entity.spells?.focus_point_current ?? maxFocusPoints,
+    current: Math.min(Math.max(storedCurrent, 0), maxFocusPoints),
     max: maxFocusPoints,
   };
 }

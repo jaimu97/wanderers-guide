@@ -14,7 +14,7 @@ import {
 } from '@schemas/content';
 import { getRootSelection, resetSelections, setSelections } from './selection-tree';
 import { Operation, OperationOptions, OperationResult, OperationSelect } from '@schemas/operations';
-import { runOperations } from './operation-runner';
+import { clearPendingBinds, resolvePendingBinds, runOperations } from './operation-runner';
 import {
   addVariable,
   adjVariable,
@@ -117,6 +117,7 @@ export async function _executeCharacterOperations(data: {
   const { character, content, context } = data;
 
   resetVariables('CHARACTER');
+  clearPendingBinds();
   defineSelectionTree(character);
   defineDefaultSources('INFO', content.defaultSources.INFO);
   defineDefaultSources('PAGE', content.defaultSources.PAGE);
@@ -178,7 +179,7 @@ export async function _executeCharacterOperations(data: {
         return a.level - b.level;
       }
     }
-    return a.name.localeCompare(b.name);
+    return (a.name ?? '').localeCompare(b.name ?? '');
   });
 
   const classFeatures_2 = getClassFeatures(content.abilityBlocks, class_2?.trait_id, '2').sort((a, b) => {
@@ -187,14 +188,14 @@ export async function _executeCharacterOperations(data: {
         return a.level - b.level;
       }
     }
-    return a.name.localeCompare(b.name);
+    return (a.name ?? '').localeCompare(b.name ?? '');
   });
 
   // Merge both but only keep one if they both have the same name and level
   let classFeatures = unionWith(
     classFeatures_1,
     classFeatures_2,
-    (a, b) => a.name.trim() === b.name.trim() && a.level === b.level
+    (a, b) => (a.name ?? '').trim() === (b.name ?? '').trim() && a.level === b.level
   );
 
   // Free Archetype feat at every even level
@@ -296,7 +297,7 @@ export async function _executeCharacterOperations(data: {
   if (character.variants?.gradual_attribute_boosts) {
     const newClassFeatures: AbilityBlock[] = [];
     for (const cf of classFeatures) {
-      if (!(cf.name.trim() === 'Attribute Boosts' && cf.operations?.length === 4) || cf.level === 1) {
+      if (!((cf.name ?? '').trim() === 'Attribute Boosts' && cf.operations?.length === 4) || cf.level === 1) {
         newClassFeatures.push(cf);
         continue;
       }
@@ -993,6 +994,9 @@ export async function _executeCharacterOperations(data: {
     ],
   });
 
+  // Apply queued variable bindings now that every round has run
+  resolvePendingBinds();
+
   // Set calculated stats
   setCalculatedStatsInStore('CHARACTER', character);
 
@@ -1014,6 +1018,7 @@ export async function _executeCreatureOperations(data: {
   const { id, creature, content } = data;
 
   resetVariables(id);
+  clearPendingBinds();
   defineSelectionTree(creature);
   defineDefaultSources('INFO', content.defaultSources.INFO);
   defineDefaultSources('PAGE', content.defaultSources.PAGE);
@@ -1112,6 +1117,9 @@ export async function _executeCreatureOperations(data: {
   const conditionalResults = await operationsPassthrough({
     doOnlyConditionals: true,
   });
+
+  // Apply queued variable bindings now that every round has run
+  resolvePendingBinds();
 
   // Set calculated stats
   setCalculatedStatsInStore(id, creature);

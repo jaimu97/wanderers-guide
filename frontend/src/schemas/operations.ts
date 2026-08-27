@@ -255,8 +255,18 @@ export type OperationInjectSelectOption = z.infer<typeof OperationInjectSelectOp
 export const OperationSelectFiltersAbilityBlockSchema = z.object({
   id: z.string(),
   type: z.literal('ABILITY_BLOCK'),
-  level: z.object({ min: z.number().nullable().optional(), max: z.number().nullable().optional() }),
+  level: z.object({
+    min: z.number().nullable().optional(),
+    // Max may be a fixed number or a variable expression string (e.g. `{{LEVEL}}` or `{{LEVEL/2}}`)
+    // that's resolved against the character at selection time. Needed for retrain-style feats
+    // (SF2e Adaptive Talent / In Another Life) and class archetype "max half your level" selections.
+    max: z.union([z.number(), z.string()]).nullable().optional(),
+  }),
   traits: z.array(z.union([z.string(), z.number()])).optional(),
+  // Only include options associated with this skill — matched against the ability block's
+  // `meta_data.skill` tags or its prerequisites (e.g. "trained in Computers").
+  // Needed for SF2e Operative specializations ("gain a skill feat tied to your specialization's skill").
+  skill: z.string().optional(),
   abilityBlockType: AbilityBlockTypeSchema.optional(),
   isFromClass: z.boolean().optional(),
   isFromAncestry: z.boolean().optional(),
@@ -268,7 +278,8 @@ export const OperationSelectFiltersSpellSchema = z.object({
   id: z.string(),
   type: z.literal('SPELL'),
   level: z.object({ min: z.number().nullable().optional(), max: z.number().nullable().optional() }),
-  traits: z.array(z.string()).optional(),
+  // Trait IDs, or legacy trait names — matches the ability-block filter above.
+  traits: z.array(z.union([z.string(), z.number()])).optional(),
   traditions: z.array(z.string()).optional(),
   spellData: SpellMetadataSchema.optional(),
 });
@@ -296,6 +307,20 @@ export const OperationSelectFiltersAdjValueSchema = z.object({
   type: z.literal('ADJ_VALUE'),
   group: z.enum(['ATTRIBUTE', 'SKILL', 'ADD-LORE', 'WEAPON-GROUP', 'WEAPON', 'ARMOR-GROUP', 'ARMOR']),
   value: z.union([VariableValueSchema, ExtendedProficiencyValueSchema]),
+  // For item-backed groups (WEAPON / ARMOR) only: restrict the list to items that have at least
+  // ONE of these traits (any-match, unlike ability block filters which require all).
+  // Trait IDs, or legacy trait names — matches the ability-block filter above.
+  traits: z.array(z.union([z.string(), z.number()])).optional(),
+  // For the WEAPON group: restrict the list to weapons that carry an ancestry (or versatile
+  // heritage) trait. Backs feats like Unconventional Weaponry / Kasatha weapon selections.
+  hasAncestryTrait: z.boolean().optional(),
+  // For item-backed groups (WEAPON / ARMOR) only: restrict the list to items of these rarities.
+  rarities: z.array(RaritySchema).optional(),
+  // For the WEAPON group: the chosen weapon's name is also appended to WEAPON_FAMILIARITY,
+  // treating it as one proficiency category lower (martial->simple, advanced->martial) so it
+  // tracks the character's category scaling. Backs "treat the chosen weapon as a simple weapon
+  // for proficiency" feats (Unconventional Weaponry).
+  addToFamiliarity: z.boolean().optional(),
 });
 export type OperationSelectFiltersAdjValue = z.infer<typeof OperationSelectFiltersAdjValueSchema>;
 
@@ -310,32 +335,48 @@ export type OperationSelectFilters = z.infer<typeof OperationSelectFiltersSchema
 
 // ─── Select Option non-recursive variants (inferred) ─────────────────────────
 
-export const OperationSelectOptionAbilityBlockSchema = z.object({
-  id: z.string(),
-  type: z.literal('ABILITY_BLOCK'),
-  operation: OperationGiveAbilityBlockSchema,
-});
+// NOTE ON `.passthrough()`: inside a PREDEFINED select with `optionType: 'CUSTOM'`, each
+// option carries a custom-display overlay — `title`, `description`, and nested `operations`
+// — *in addition to* its base `type`/`operation` (e.g. Witchwarper's key-attribute options
+// are `type: 'ADJ_VALUE'` but still hold a `title` of "Charisma"/"Intelligence"). The render
+// pipeline (`getCustomPredefinedList`) derives the option's visible label from that `title`.
+// Without `.passthrough()`, Zod validation at the content-cache boundary (`validateAndWarn`)
+// strips those unknown keys, leaving the option label `undefined` and the select renders as
+// blank rows. Passthrough preserves the overlay so custom selects display their options.
+export const OperationSelectOptionAbilityBlockSchema = z
+  .object({
+    id: z.string(),
+    type: z.literal('ABILITY_BLOCK'),
+    operation: OperationGiveAbilityBlockSchema,
+  })
+  .passthrough();
 export type OperationSelectOptionAbilityBlock = z.infer<typeof OperationSelectOptionAbilityBlockSchema>;
 
-export const OperationSelectOptionSpellSchema = z.object({
-  id: z.string(),
-  type: z.literal('SPELL'),
-  operation: OperationGiveSpellSchema,
-});
+export const OperationSelectOptionSpellSchema = z
+  .object({
+    id: z.string(),
+    type: z.literal('SPELL'),
+    operation: OperationGiveSpellSchema,
+  })
+  .passthrough();
 export type OperationSelectOptionSpell = z.infer<typeof OperationSelectOptionSpellSchema>;
 
-export const OperationSelectOptionLanguageSchema = z.object({
-  id: z.string(),
-  type: z.literal('LANGUAGE'),
-  operation: OperationGiveLanguageSchema,
-});
+export const OperationSelectOptionLanguageSchema = z
+  .object({
+    id: z.string(),
+    type: z.literal('LANGUAGE'),
+    operation: OperationGiveLanguageSchema,
+  })
+  .passthrough();
 export type OperationSelectOptionLanguage = z.infer<typeof OperationSelectOptionLanguageSchema>;
 
-export const OperationSelectOptionAdjValueSchema = z.object({
-  id: z.string(),
-  type: z.literal('ADJ_VALUE'),
-  operation: OperationAdjValueSchema,
-});
+export const OperationSelectOptionAdjValueSchema = z
+  .object({
+    id: z.string(),
+    type: z.literal('ADJ_VALUE'),
+    operation: OperationAdjValueSchema,
+  })
+  .passthrough();
 export type OperationSelectOptionAdjValue = z.infer<typeof OperationSelectOptionAdjValueSchema>;
 
 // ─── Recursive types — must be declared manually for z.lazy() ────────────────

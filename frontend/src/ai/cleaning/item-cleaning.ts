@@ -416,11 +416,23 @@ Also frequently use fetchContent to search for similar or related content in the
 Rewrite the description using rich inline markdown links following the rules above. Additional formatting rules:
 - Action costs use this HTML: <abbr cost="{ACTION_COST}" class="action-symbol">{N}</abbr>
   Valid ACTION_COST values: ONE-ACTION, TWO-ACTIONS, THREE-ACTIONS, REACTION, FREE-ACTION,
-  ONE-TO-TWO-ACTIONS, ONE-TO-THREE-ACTIONS, TWO-TO-THREE-ACTIONS
+  REACTION-OR-ONE-ACTION, ONE-TO-TWO-ACTIONS, ONE-TO-THREE-ACTIONS, TWO-TO-THREE-ACTIONS
   Only add action symbols when AoN explicitly shows an action cost. Do not add them to inline references to action names (e.g. "Interact" in a sentence is just text, not an action symbol).
 - Activation lines should be formatted as:
   **Activate—Title** <abbr cost="TWO-ACTIONS" class="action-symbol">2</abbr> ([trait](link_trait_ID), ...); **Effect** ...
-- Remove * * * horizontal dividers — use a semicolon or line break instead
+- Keep the * * * divider that separates an item's stat lines (Price, Usage, Activate,
+  Ammunition, ...) from the description prose — the source books print a dividing line
+  exactly there and WG mirrors the book layout. Do not add dividers the book doesn't
+  have, and remove a trailing divider with nothing after it. (Settled 2026-08-25 after a
+  restoration pass re-added ~1,050 stripped dividers; do not flip this rule again without
+  checking that history.)
+- NEVER strip trailing double-spaces at the end of a line — they are markdown hard line
+  breaks, and WG's renderer treats a bare newline as a paragraph join (no remark-breaks),
+  so removing them merges consecutive stat lines (Ammunition, Activate, Damage, Range,
+  Reload, Group, ...) into one run-on rendered line. Preserve them exactly where the
+  original text has them, and end each stat line that is followed by another stat line
+  with two trailing spaces. (A 2026-08-26 repair pass restored 167 stripped hard breaks
+  across 74 items — do not reintroduce this.)
 - Do NOT add markdown headers (#) or bullet lists unless the original had them
 
 ### 3. Fix the usage field
@@ -489,7 +501,7 @@ Pathfinder 2e has two editions — the legacy edition and the remaster (2023+). 
 - Never invent IDs. Always fetch content by name to find the correct numeric ID.
 - meta_data must be returned as a plain JSON object (not a serialized string).
 - **meta_data.category and meta_data.group mean different things for weapons vs armor.** Leave them absent on all other item types (GENERAL, SHIELD, RUNE, etc.).
-  - **Armor** — category: the armor weight class ("light", "medium", "heavy", "unarmored_defense"). group: the armor specialization group — valid PF2e values: "Chain", "Composite", "Leather", "Plate", "Skeletal", "Wood"; valid SF2e values: "Cloth", "Ceramic", "Polymer".
+  - **Armor** — category: the armor weight class ("light", "medium", "heavy", "unarmored_defense"). group: the armor specialization group — valid PF2e values: "chain", "composite", "leather", "plate", "skeletal", "wood"; valid SF2e values: "cloth", "ceramic", "polymer". (These MUST be lowercase to match the schema — Title Case will fail validation.)
   - **Weapons** — category: the proficiency category ("simple", "martial", "advanced", "unarmed_attack"). group: the weapon specialization group — valid PF2e values: "axe", "bomb", "bow", "brawling", "club", "crossbow", "dart", "firearm", "flail", "hammer", "knife", "pick", "polearm", "projectile", "shield", "sling", "spear", "sword"; valid SF2e values: "corrosive", "cryo", "flame", "grenade", "laser", "mental", "missile", "plasma", "poison", "shock", "sniper", "sonic". Any value not in these lists is wrong and must be corrected.
 - The top-level "group" field categorizes the item type. The ONLY valid values are: GENERAL (misc items, consumables, gear), WEAPON, ARMOR, SHIELD, RUNE (PF2e only — runes applied to weapons/armor), UPGRADE (SF2e only — upgrades applied to weapons/armor), MATERIAL (for things like silver ore or adamantine ingots). Any other value (e.g. "CATALYST", "POISON", etc.) is wrong and must be corrected — default to GENERAL unless the item is clearly a weapon, armor, shield, rune, upgrade, or material.
 - Preserve all restricted fields unchanged (id, created_at, content_source_id, version, uuid).

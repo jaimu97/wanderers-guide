@@ -7,7 +7,7 @@ import { DisplayIcon } from '@common/IconDisplay';
 import { selectContent } from '@common/select/SelectContent';
 import { applyConditions } from '@conditions/condition-handler';
 import { GUIDE_BLUE, IMPRINT_BG_COLOR, IMPRINT_BORDER_COLOR } from '@constants/data';
-import { defineDefaultSources, fetchContentPackage, getDefaultSources } from '@content/content-store';
+import { defineDefaultSources, fetchContentPackage, getDefaultSources, getDefaultSourcesKey } from '@content/content-store';
 import { getBestArmor } from '@items/inv-utils';
 import {
   Tabs,
@@ -57,7 +57,7 @@ import { getFinalAcValue, getFinalHealthValue, getFinalProfValue } from '@variab
 import { cloneDeep, debounce, isEqual, mean, truncate } from 'lodash-es';
 import { evaluate } from 'mathjs';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { GiDiceTwentyFacesTwenty } from 'react-icons/gi';
+import { GiDiceTwentyFacesTwenty } from '@common/game-icons-inline';
 import { useAtom, useAtomValue } from 'jotai';
 import BlurBox from '@common/BlurBox';
 import ImprintButton from '@common/ImprintButton';
@@ -582,6 +582,8 @@ function EncounterView(props: {
       `computed-combatants`,
       {
         combatants: combatants,
+        // computeCombatants fetches content scoped by the default PAGE sources
+        sources: getDefaultSourcesKey('PAGE'),
       },
     ],
     queryFn: async () => {
