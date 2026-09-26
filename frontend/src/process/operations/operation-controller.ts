@@ -14,9 +14,17 @@ import {
 } from '@schemas/content';
 import { getRootSelection, resetSelections, setSelections } from './selection-tree';
 import { Operation, OperationOptions, OperationResult, OperationSelect } from '@schemas/operations';
-import { clearPendingBinds, resolvePendingBinds, runOperations } from './operation-runner';
+import {
+  clearDeferredOperations,
+  resolveDeferredOperations,
+  runOperations,
+  withContentGrant,
+} from './operation-runner';
 import {
   addVariable,
+  areVariableEffectScopesActive,
+  getVariableEffectScopes,
+  finishVariableEffects,
   adjVariable,
   exportVariableStore,
   getAllAttributeVariables,
@@ -25,8 +33,16 @@ import {
   importVariableStore,
   resetVariables,
   setVariable,
+  getSkillSelectionPreview,
 } from '@variables/variable-manager';
-import { isAttributeValue, labelToVariable, variableToLabel } from '@variables/variable-utils';
+import {
+  isAttributeValue,
+  isExtendedProficiencyType,
+  isProficiencyType,
+  labelToVariable,
+  variableToLabel,
+} from '@variables/variable-utils';
+import { SkillEffectContextSchema } from '@variables/skill-progression';
 import { hashData, rankNumber } from '@utils/numbers';
 import { StoreID, VariableListStr, VariableStore } from '@schemas/variables';
 import {
@@ -44,6 +60,19 @@ import { cloneDeep, isEqual, mergeWith, unionWith, uniqWith } from 'lodash-es';
 import { setCalculatedStatsInStore } from '@variables/calculated-stats';
 import { getEntityLevel } from '@utils/entity-utils';
 import { defineDefaultSources, importFromContentPackage } from '@content/content-store';
+import { setEidolonRunesInStore } from '@items/eidolon-runes';
+
+let executionQueue: Promise<void> = Promise.resolve();
+
+/** Keep the module's variable, selection and deferred-operation context exclusive. */
+function withOperationStore<T>(execute: () => Promise<T>): Promise<T> {
+  const result = executionQueue.then(execute);
+  executionQueue = result.then(
+    () => undefined,
+    () => undefined
+  );
+  return result;
+}
 
 /**
  * Inits the op selection tree based on an entity's op data
@@ -69,6 +98,7 @@ function defineSelectionTree(entity: LivingEntity) {
  * @param operations - Array of operations to execute
  * @param options - Operation options
  * @param sourceLabel - Label for the source (for logging/debugging)
+ * @param sourceLevel - Level when this source's choices are earned; nested selections inherit it.
  * @returns - Array of operation results
  */
 async function _executeOps(
@@ -76,21 +106,29 @@ async function _executeOps(
   primarySource: string,
   operations: Operation[],
   options?: OperationOptions,
-  sourceLabel?: string
+  sourceLabel?: string,
+  grantedContent?: { id: number; name: string; prefix?: string },
+  sourceLevel = 1
 ) {
-  const selectionNode = getRootSelection().children[primarySource];
-  let results = await runOperations(
-    varId,
-    { path: `${primarySource}_${selectionNode?.value}`, node: selectionNode },
-    operations,
-    cloneDeep(options),
-    sourceLabel
-  );
-
-  // Make it so you can only select boosts that haven't been selected (or given) yet
-  results = limitBoostOptions(operations, results);
-
-  return results;
+  const execute = async (): Promise<OperationResult[]> => {
+    const selectionNode = getRootSelection().children[primarySource];
+    let results = await runOperations(
+      varId,
+      { path: `${primarySource}_${selectionNode?.value}`, node: selectionNode },
+      operations,
+      { ...cloneDeep(options), sourceLevel },
+      sourceLabel
+    );
+    if (grantedContent?.prefix && areVariableEffectScopesActive(getVariableEffectScopes(varId))) {
+      adjVariable(varId, `${grantedContent.prefix}_IDS`, `${grantedContent.id}`, sourceLabel);
+      adjVariable(varId, `${grantedContent.prefix}_NAMES`, grantedContent.name.toUpperCase(), sourceLabel);
+    }
+    results = limitBoostOptions(operations, results);
+    return results;
+  };
+  return grantedContent
+    ? ((await withContentGrant(varId, primarySource, `ability-block:${grantedContent.id}`, options, execute)) ?? [])
+    : execute();
 }
 
 /*
@@ -113,11 +151,26 @@ export async function _executeCharacterOperations(data: {
 }): Promise<{
   store: VariableStore;
   ors: OperationCharacterResultPackage;
+  errors: string[];
 }> {
+  return withOperationStore(async () => {
+    try {
+      return await executeCharacterOperations(data);
+    } finally {
+      finishVariableEffects('CHARACTER');
+      clearDeferredOperations();
+    }
+  });
+}
+
+/** Character execution body; access is serialized by the public controller entry. */
+async function executeCharacterOperations(
+  data: Parameters<typeof _executeCharacterOperations>[0]
+): ReturnType<typeof _executeCharacterOperations> {
   const { character, content, context } = data;
 
   resetVariables('CHARACTER');
-  clearPendingBinds();
+  clearDeferredOperations();
   defineSelectionTree(character);
   defineDefaultSources('INFO', content.defaultSources.INFO);
   defineDefaultSources('PAGE', content.defaultSources.PAGE);
@@ -754,7 +807,9 @@ export async function _executeCharacterOperations(data: {
       'character',
       character.options?.custom_operations ? (character.custom_operations ?? []) : [],
       options,
-      'Custom'
+      'Custom',
+      undefined,
+      character.level
     );
 
     let classResults: OperationResult[] = [];
@@ -767,6 +822,7 @@ export async function _executeCharacterOperations(data: {
         class_.name
       );
       addVariable('CHARACTER', 'num', labelToVariable(`TRAIT_CLASS_${class_.name}_IDS`), class_.trait_id, class_.name);
+      adjVariable('CHARACTER', 'TRAIT_NAMES', class_.name.toUpperCase(), class_.name);
 
       // Add class to variables
       adjVariable('CHARACTER', 'CLASS_IDS', `${class_.id}`, undefined);
@@ -800,6 +856,7 @@ export async function _executeCharacterOperations(data: {
         class_2.trait_id,
         class_2.name
       );
+      adjVariable('CHARACTER', 'TRAIT_NAMES', class_2.name.toUpperCase(), class_2.name);
 
       // Add class to variables
       adjVariable('CHARACTER', 'CLASS_IDS', `${class_2.id}`, undefined);
@@ -833,6 +890,7 @@ export async function _executeCharacterOperations(data: {
         ancestry.trait_id,
         ancestry.name
       );
+      adjVariable('CHARACTER', 'TRAIT_NAMES', ancestry.name.toUpperCase(), ancestry.name);
 
       // Add ancestry to variables
       adjVariable('CHARACTER', 'ANCESTRY_IDS', `${ancestry.id}`, undefined);
@@ -867,7 +925,9 @@ export async function _executeCharacterOperations(data: {
             `ancestry-section-${section.id}`,
             section.operations ?? [],
             options,
-            `${section.name} (Lvl. ${section.level})`
+            `${section.name} (Lvl. ${section.level})`,
+            undefined,
+            section.level ?? 1
           );
 
           ancestrySectionResults.push({
@@ -889,17 +949,15 @@ export async function _executeCharacterOperations(data: {
           `class-feature-${feature.id}`,
           feature.operations ?? [],
           options,
-          `${feature.name} (Lvl. ${feature.level})`
+          `${feature.name} (Lvl. ${feature.level})`,
+          { id: feature.id, name: feature.name, prefix: 'CLASS_FEATURE' },
+          feature.level ?? 1
         );
 
         classFeatureResults.push({
           baseSource: feature,
           baseResults: results,
         });
-
-        // Add class feature to variables
-        adjVariable('CHARACTER', 'CLASS_FEATURE_IDS', `${feature.id}`, undefined);
-        adjVariable('CHARACTER', 'CLASS_FEATURE_NAMES', feature.name.toUpperCase(), undefined);
       }
     }
 
@@ -923,7 +981,9 @@ export async function _executeCharacterOperations(data: {
         `item-${invItem.item.id}`,
         getItemOperations(invItem.item, content),
         options,
-        invItem.item.name
+        invItem.item.name,
+        undefined,
+        character.level
       );
 
       if (results.length > 0) {
@@ -942,7 +1002,9 @@ export async function _executeCharacterOperations(data: {
         `mode-${mode.id}`,
         mode.operations ?? [],
         options,
-        `${mode.name} Mode`
+        `${mode.name} Mode`,
+        { id: mode.id, name: mode.name },
+        character.level
       );
 
       if (results.length > 0) {
@@ -994,16 +1056,53 @@ export async function _executeCharacterOperations(data: {
     ],
   });
 
-  // Apply queued variable bindings now that every round has run
-  resolvePendingBinds();
+  // Apply explicit language overrides and variable bindings after every grant has run.
+  const errors = await resolveDeferredOperations();
 
   // Set calculated stats
+  setEidolonRunesInStore(character);
   setCalculatedStatsInStore('CHARACTER', character);
 
+  const mergedResults = mergeOperationResults(results, conditionalResults) as typeof results;
+  for (const group of [
+    mergedResults.characterResults,
+    mergedResults.classResults,
+    mergedResults.class2Results,
+    mergedResults.ancestryResults,
+    mergedResults.backgroundResults,
+    ...mergedResults.contentSourceResults.map(({ baseResults }) => baseResults),
+    ...mergedResults.classFeatureResults.map(({ baseResults }) => baseResults),
+    ...mergedResults.ancestrySectionResults.map(({ baseResults }) => baseResults),
+    ...mergedResults.itemResults.map(({ baseResults }) => baseResults),
+    ...mergedResults.modeResults.map(({ baseResults }) => baseResults),
+  ]) {
+    addSkillSelectionPreviews('CHARACTER', group);
+  }
   return {
     store: exportVariableStore('CHARACTER'),
-    ors: mergeOperationResults(results, conditionalResults) as typeof results,
+    ors: mergedResults,
+    errors,
   };
+}
+
+/** Export only computed choice previews after grants from every pass are available. */
+function addSkillSelectionPreviews(id: StoreID, results: OperationResult[]): void {
+  for (const result of results) {
+    for (const option of result?.selection?.options ?? []) {
+      const context = SkillEffectContextSchema.safeParse(option._skill_context);
+      const adjustment: unknown = option.value?.value;
+      if (
+        context.success &&
+        typeof option.variable === 'string' &&
+        (isProficiencyType(adjustment) || (typeof adjustment === 'string' && isExtendedProficiencyType(adjustment)))
+      ) {
+        option._skill_preview = getSkillSelectionPreview(id, option.variable, adjustment, context.data);
+      }
+      delete option._skill_context;
+    }
+    if (result?.result?.source) delete result.result.source._skill_context;
+    if (result?.result?.results) addSkillSelectionPreviews(id, result.result.results);
+  }
 }
 
 export async function _executeCreatureOperations(data: {
@@ -1014,11 +1113,26 @@ export async function _executeCreatureOperations(data: {
 }): Promise<{
   store: VariableStore;
   ors: OperationCreatureResultPackage;
+  errors: string[];
 }> {
+  return withOperationStore(async () => {
+    try {
+      return await executeCreatureOperations(data);
+    } finally {
+      finishVariableEffects(data.id);
+      clearDeferredOperations();
+    }
+  });
+}
+
+/** Creature execution shares the same exclusive context as character execution. */
+async function executeCreatureOperations(
+  data: Parameters<typeof _executeCreatureOperations>[0]
+): ReturnType<typeof _executeCreatureOperations> {
   const { id, creature, content } = data;
 
   resetVariables(id);
-  clearPendingBinds();
+  clearDeferredOperations();
   defineSelectionTree(creature);
   defineDefaultSources('INFO', content.defaultSources.INFO);
   defineDefaultSources('PAGE', content.defaultSources.PAGE);
@@ -1038,23 +1152,35 @@ export async function _executeCreatureOperations(data: {
   ];
 
   const operationsPassthrough = async (options?: OperationOptions) => {
-    let creatureResults = await _executeOps(id, 'creature', creature.operations ?? [], options, creature.name);
+    let creatureResults = await _executeOps(
+      id,
+      'creature',
+      creature.operations ?? [],
+      options,
+      creature.name,
+      undefined,
+      getEntityLevel(creature)
+    );
 
     let abilityResults: {
       baseSource: AbilityBlock;
       baseResults: OperationResult[];
     }[] = [];
     for (const ability of abilities) {
-      const results = await _executeOps(id, `ability-${ability.id}`, ability.operations ?? [], options, ability.name);
+      const results = await _executeOps(
+        id,
+        `ability-${ability.id}`,
+        ability.operations ?? [],
+        options,
+        ability.name,
+        { id: ability.id, name: ability.name, prefix: 'FEAT' },
+        getEntityLevel(creature)
+      );
 
       abilityResults.push({
         baseSource: ability,
         baseResults: results,
       });
-
-      // Add ability to variables
-      adjVariable(id, 'FEAT_IDS', `${ability.id}`, undefined);
-      adjVariable(id, 'FEAT_NAMES', ability.name.toUpperCase(), undefined);
     }
 
     let itemResults: { baseSource: Item; baseResults: OperationResult[] }[] = [];
@@ -1077,7 +1203,9 @@ export async function _executeCreatureOperations(data: {
         `item-${invItem.item.id}`,
         getItemOperations(invItem.item, content),
         options,
-        invItem.item.name
+        invItem.item.name,
+        undefined,
+        getEntityLevel(creature)
       );
 
       if (results.length > 0) {
@@ -1118,15 +1246,23 @@ export async function _executeCreatureOperations(data: {
     doOnlyConditionals: true,
   });
 
-  // Apply queued variable bindings now that every round has run
-  resolvePendingBinds();
+  // Apply explicit language overrides and variable bindings after every grant has run.
+  const errors = await resolveDeferredOperations();
 
   // Set calculated stats
   setCalculatedStatsInStore(id, creature);
 
+  const mergedResults = mergeOperationResults(results, conditionalResults) as typeof results;
+  for (const group of [
+    mergedResults.creatureResults,
+    ...mergedResults.abilityResults.map(({ baseResults }) => baseResults),
+    ...mergedResults.itemResults.map(({ baseResults }) => baseResults),
+  ])
+    addSkillSelectionPreviews(id, group);
   return {
     store: exportVariableStore(id),
-    ors: mergeOperationResults(results, conditionalResults) as typeof results,
+    ors: mergedResults,
+    errors,
   };
 }
 

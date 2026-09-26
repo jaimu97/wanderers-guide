@@ -2,7 +2,7 @@ import { characterState } from '@atoms/characterAtoms';
 import { creatureDrawerState, drawerState } from '@atoms/navAtoms';
 import { sessionState } from '@atoms/supabaseAtoms';
 import { getContentDataFromHref } from '@common/rich_text_input/ContentLinkExtension';
-import { GUIDE_BLUE, IMPRINT_BG_COLOR, IMPRINT_BORDER_COLOR } from '@constants/data';
+import { IMPRINT_BG_COLOR, IMPRINT_BORDER_COLOR } from '@constants/data';
 import { getCachedCustomization } from '@content/customization-cache';
 import DrawerBase from '@drawers/DrawerBase';
 import { convertContentLink } from '@drawers/drawer-utils';
@@ -18,7 +18,9 @@ import {
 } from '@mantine/core';
 import { useMediaQuery, usePrevious } from '@mantine/hooks';
 import { ModalsProvider } from '@mantine/modals';
-import { Notifications, showNotification } from '@mantine/notifications';
+import { AppUpdateNotice } from '@common/AppUpdateNotice';
+import { Notifications } from '@mantine/notifications';
+import { notifySessionExpired, resetSessionExpiredNotice } from '@requests/request-manager';
 import { clearUserData, getCachedPublicUser } from '@auth/user-manager';
 import SearchSpotlight from '@nav/SearchSpotlight';
 import { IconBrush } from '@tabler/icons-react';
@@ -30,7 +32,7 @@ import { supabase } from './main';
 import Layout from './nav/Layout';
 import AddNewLoreModal from '@modals/AddNewLoreModal';
 import { phoneQuery } from '@utils/mobile-responsive';
-import { resetContentStore } from '@content/content-store';
+import { resetContentStore, setContentCacheActor } from '@content/content-store';
 import SelectContentModal from '@common/select/SelectContent';
 import ConditionModal from '@modals/ConditionModal';
 import CreateDicePresetModal from '@modals/CreateDicePresetModal';
@@ -47,8 +49,8 @@ import UpdateEncounterModal from '@modals/UpdateEncounterModal';
 import GenerateEncounterModal from '@modals/GenerateEncounterModal';
 import UpdateApiClientModal from '@modals/UpdateApiClientModal';
 import { getAnchorStyles } from '@utils/anchor';
+import { generateThemeColors } from '@utils/theme-color';
 import BuyItemModal from '@modals/BuyItemModal';
-import { generateColors } from '@mantine/colors-generator';
 import { ImageOption } from '@schemas/index';
 
 // TODO, it would be great to dynamically import these modals, but it with Mantine v7.6.2 it doesn't work
@@ -85,6 +87,16 @@ const modals = {
 //   }
 // }
 
+/** Load the optional font once, when the active customization requests it. */
+function ensureDyslexicFontLoaded() {
+  if (document.getElementById('open-dyslexic-font')) return;
+  const link = document.createElement('link');
+  link.id = 'open-dyslexic-font';
+  link.rel = 'stylesheet';
+  link.href = 'https://cdn.jsdelivr.net/npm/open-dyslexic@1.0.3/open-dyslexic-regular.min.css';
+  document.head.appendChild(link);
+}
+
 export default function App() {
   const [_drawer, openDrawer] = useAtom(drawerState);
   const [_creatureDrawer, openCreatureDrawer] = useAtom(creatureDrawerState);
@@ -95,6 +107,7 @@ export default function App() {
     resetContentStore();
 
     supabase.auth.getSession().then(({ data: { session } }) => {
+      setContentCacheActor(session?.user.id ?? null);
       setSession(session);
       // Cold load with a dead session (expired from inactivity while the tab was
       // closed): supabase-js clears its stored session without a SIGNED_OUT event,
@@ -111,7 +124,9 @@ export default function App() {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, session) => {
+      setContentCacheActor(session?.user.id ?? null);
       setSession(session);
+      if (session) resetSessionExpiredNotice();
 
       if (event === 'SIGNED_OUT') {
         // The session ended. If the cached user data is still present, this was NOT an
@@ -123,13 +138,7 @@ export default function App() {
         const hadUser = !!getCachedPublicUser();
         clearUserData();
         if (hadUser && !window.location.pathname.startsWith('/login')) {
-          showNotification({
-            id: 'session-expired',
-            title: 'Session expired',
-            message: 'You have been signed out due to inactivity. Please sign in again to save your changes.',
-            color: 'yellow',
-            autoClose: false,
-          });
+          notifySessionExpired();
         }
       }
     });
@@ -158,10 +167,15 @@ export default function App() {
     })();
   }, [activeCharacer]);
 
+  const dyslexiaFontEnabled = !!getCachedCustomization()?.sheet_theme?.dyslexia_font;
+  useEffect(() => {
+    if (dyslexiaFontEnabled) ensureDyslexicFontLoaded();
+  }, [dyslexiaFontEnabled]);
+
   const generateTheme = (theme?: { color?: string }) => {
     return createTheme({
       colors: {
-        guide: generateColors(theme?.color || getCachedCustomization()?.sheet_theme?.color || GUIDE_BLUE),
+        guide: generateThemeColors(theme?.color || getCachedCustomization()?.sheet_theme?.color),
         // Dark scale: near-opaque at [0] → nearly transparent at [9]
         dark: [
           'rgba(193, 194, 197, 0.89)', // [0] lightest text / icons
@@ -194,9 +208,7 @@ export default function App() {
       cursorType: 'pointer',
       primaryColor: 'guide',
       defaultRadius: 'md',
-      fontFamily: getCachedCustomization()?.sheet_theme?.dyslexia_font
-        ? 'OpenDyslexicRegular'
-        : 'Montserrat, sans-serif',
+      fontFamily: dyslexiaFontEnabled ? 'OpenDyslexicRegular, sans-serif' : 'Montserrat, sans-serif',
       fontFamilyMonospace: 'Ubuntu Mono, monospace',
       components: {
         Popover: {
@@ -366,6 +378,7 @@ export default function App() {
         )}
         <SearchSpotlight />
         <Notifications position='top-right' zIndex={9400} containerWidth={350} />
+        <AppUpdateNotice />
         <DrawerBase />
         <Box style={{ zoom: getCachedCustomization()?.sheet_theme?.zoom ?? 1 }}>
           <Layout>

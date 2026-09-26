@@ -67,8 +67,12 @@ In the `frontend/` directory, copy `.env.local.template` to `.env.local` and rep
 Still in the `frontend/` directory, run the following:
 
 ```bash
-npm i
+npm ci --legacy-peer-deps
 ```
+
+CI and Docker use the same lockfile and install command. Keep development
+dependencies installed when running the content tools or regression tests; their
+bundler, `esbuild`, is declared directly in `devDependencies`.
 
 </Step>
 <Step title="Serve the frontend">
@@ -96,6 +100,104 @@ Wanderer's Guide should now be running locally! You can access it at: http://loc
 To be able to log in, you need to have a user in the local database.
 </Step>
 </Steps>
+
+## Agent workspace
+
+Project instructions and skills are consolidated under `.agents/`, with the entry point in the repository’s `AGENTS.md`. The frontend and documentation preview commands are recorded in `.agents/launch.json`; run them from the repository root. Codex’s Mantine MCP configuration remains in `.codex/config.toml`. The five Quzzar skills are installed locally from `Quzzar/skills`, with their source revision in `.agents/skill-sources.json` and routing in `AGENTS.md`.
+
+Local Git worktrees live under `.agents/worktrees/`. Historical Claude configuration and local permissions are archived in `.agents/legacy/`. Both directories are ignored by Git.
+
+## Validating content
+
+Use the app's Zod schemas to check a proposed row or JSON array before submitting it:
+
+```bash
+npm --prefix frontend run validate:content -- item /absolute/path/items.json
+```
+
+The file validator also accepts JSON on stdin. Exit codes are `0` for valid content,
+`1` for invalid content, and `2` for bad arguments or unreadable JSON.
+
+For a read-only scan of stored content, supply `SUPABASE_URL` (the project's origin,
+such as `http://127.0.0.1:54321`) and `SUPABASE_SERVICE_ROLE_KEY` in your shell's
+environment, then run:
+
+```bash
+npm --prefix frontend run audit:content -- --tables item,spell
+```
+
+Keep the service-role key in your secret manager or ignored environment file; never
+put it in a `VITE_` variable, source file, or report. The CLI does not load environment
+files automatically, discover production credentials, or write to the database.
+Omit `--tables` to audit all 13 supported content types. Use `--help` to list them.
+
+The audit reads raw rows, including homebrew rows visible to the supplied credential.
+It checks their structure, not rules accuracy or whether curators have approved them.
+Results are written to the ignored `frontend/scripts/reports/content-audit.json`;
+`--out` selects a different path. Treat reports as private because they may identify
+unpublished content. A complete scan exits `0` when valid or `1` when invalid rows
+exist. Failed reads, malformed pages, invalid configuration, or report-write failures
+exit `2`; never use an earlier report as evidence that a failed run passed.
+
+Pagination uses increasing IDs and continues after short pages, accommodating server
+page-size caps. Each table is bounded by its starting maximum ID. Concurrent edits
+and deletions can still affect results: this is a live scan, not a database snapshot.
+Use a snapshot or quiet database when a reproducible full audit is required.
+
+Run the audit CLI regression tests with `npm --prefix frontend run test:audit:content`.
+They use a local HTTP fixture and require no database credentials.
+
+Run the character rules and item drawer regressions with `npm --prefix frontend run test:rules`.
+These bundle the actual operation engine and drawer components against explicit local fixtures;
+selected rules content comes from the checked-in sanitized data dump. They need no running
+database or authentication account.
+
+The broad PF2e matrix is part of `test:rules`: **1,211 comparisons across 469 engine
+calculations**, grouped into 49 named scenarios and a coverage guard. It loads four
+official sources from the checked-in dump, uses fixed content identities, and freezes
+fixtures so one calculation cannot change later inputs. A discrepancy fails the command
+and CI. It requires no ignored audit exports or local database. To run only that matrix:
+
+```bash
+node --test frontend/scripts/pf2e-matrix.test.mjs
+```
+
+These are correlated comparisons, not 1,211 independent user journeys. They cover
+Fighter, Wizard, Rogue and Monk at selected levels, controlled attributes, condition
+combinations, armor thresholds, variants, replay and selected skill progression. They
+do not certify complete legal builds, every class/archetype, every property rune or
+arbitrary homebrew. Absolute rule examples and condition deltas have separate oracles;
+a baseline comparison alone cannot establish the correctness of that baseline.
+
+The rules suite includes the retained PF2e stress cases for combined typed modifiers,
+attack attributes, armor potency, speed penalties, deterministic condition derivation,
+and explicit Drained/Dying/Wounded transitions. The infrastructure suite verifies
+coupled HP/condition conflicts, including companion levels and lost acknowledgements.
+The Cypress `conditionMath.cy.ts` and `encounterSync.cy.ts` specs exercise these edits
+through actual sheet and GM controls, local API saves, mobile viewports, reloading,
+and simulated connection failures. They create and clean up synthetic characters.
+The sheet spec also holds a required content response, verifies no partial save occurs,
+then checks nested homebrew variables and binding chains through level changes and
+reopening. A cyclic homebrew graph must show calculation recovery without persisting
+partial math. The fast homebrew tests cover conditional custom Lore, binding order,
+self-links, repeated assignments, long chains, and companion isolation.
+
+Run request recovery, buffered character saves, and worker lifecycle regressions with
+`npm --prefix frontend run test:infra`. These exercise the real request manager, save hook,
+and operation lifecycle with controlled authentication, network, storage, and worker
+boundaries. They require no running database or production credentials. CI runs these
+regression suites before the production build. The content selector tests also exercise an
+already typed search while its catalog is still loading, and verify that removed sources
+or filtered choices disappear from search results without another keystroke.
+
+Timing failures belong in the correctness suite when they can change results. Cache
+tests hold IndexedDB reads, writes and deletion independently: fresh downloads must
+continue, and a late cache cannot resurrect content a completed download says is absent.
+Worker tests include the production four-worker pool, queued companions, rapid owner
+changes, reversed completions and a worker failure. These are deterministic integration
+tests with controlled I/O boundaries; Cypress adds the actual browser, worker and API.
+A passing run is evidence for these behaviors, not a universal clean bill of health or
+a physical iPhone/Android performance benchmark.
 
 ## Creating a user
 
@@ -157,7 +259,8 @@ npm run docker:start
 ./data/create-db-docker.sh
 ```
 
-This wipes and reloads the public schema, so it's safe to re-run.
+This wipes and reloads the public schema. Run it only for a disposable local database;
+back up any local characters or homebrew you want to keep first.
 
 </Step>
 <Step title="(Optional) Open Supabase Studio">
@@ -209,6 +312,63 @@ npm --prefix frontend run cy:e2e:open     # interactive Cypress UI
 npm --prefix frontend run cy:e2e -- --spec "cypress/e2e/login/*.cy.ts"
 ```
 
+The `characters/calculationRecovery.cy.ts` and `characters/saveRecovery.cy.ts` specs
+verify worker failure/retry and retained-edit recovery in the rendered app, including
+desktop and mobile screenshots. Both create and clean up their own local test character.
+
+The `characters/connectionRecovery.cy.ts` spec interrupts real character writes, lets a
+real committed response exceed the client timeout, and prepares spells at phone width
+with 4× CPU throttling before interrupting saving and reopening the page. Assertions read the local database
+through the API as well as the UI. It uses only its own test characters. These scenarios
+simulate flaky transport, constrained CPU and page lifecycle boundaries, not iOS/Android
+process eviction or a measured physical-device performance profile. The save-hook regressions also cover uncertain writes,
+intentional reversions, separate-tab drafts, storage exhaustion, and account changes.
+
+The `characters/mobileLoading.cy.ts` scenario applies 150 ms latency, 192 KiB/s
+download throughput, 96 KiB/s upload throughput, and 4x CPU throttling before visiting
+the app. It creates a fresh account scope, loads a sheet, waits for the actual content
+cache transaction, and reloads with a delayed freshness check and unavailable catalog
+endpoints. The cached sheet must become usable without replacement catalog requests.
+The worker-package regression in `test:infra` runs the real worker entry point, controller,
+and content store with network and authentication lookups unavailable. It checks grants,
+source boundaries, consecutive packages, missing tables, and cleanup after failure.
+Separate cases cover cross-book references: their existing scoped lookup must still
+work online and fail clearly when an uncached dependency cannot be downloaded.
+The real Wizard fixture also exercises its legacy trait-name filter with all network
+access disabled; duplicate trait names preserve the API's first-by-ID result across
+INFO and PAGE while selection lists keep their PAGE source boundaries.
+Use a production build and preview for startup measurements; development modules have
+different download behavior. These are controlled Chromium scenarios, not measurements
+on a physical phone.
+
+After `npm --prefix frontend run build`, run `npm --prefix frontend run test:build`.
+This checks the generated service worker and output files: the app shell stays precached,
+the developer report is excluded, and the optional game-icon chunk is cached after use.
+Bundle reports are written to `frontend/.scratch/bundle-stats.html` for local analysis.
+The first use of a game icon or icon picker can require a download; reopening it can
+use the runtime cache. The complete icon library is not fetched on an idle timer.
+
+The encounter writer regressions run in `test:infra`. They exercise GM/player races,
+serialized HP edits, lost acknowledgements, narrow guarded writes, retained drafts,
+and failure/conflict responses. The encounter keeps unsynced edits visible and retries
+transport failures. Conflicting edits offer **Open character**, which opens the sheet's
+existing conflict resolution flow. Navigating away preserves its versioned local draft; the campaign
+does not automatically restore old drafts into encounter controls on a new visit.
+
+`campaigns/encounterSync.cy.ts` creates two confirmed synthetic accounts, joins a real
+campaign through its join-key API, and tests the actual GM HP control while the player
+updates the same character independently. It covers typing during polls, Enter/blur
+deduplication, nested player edits, failed reads/writes, retry, and mobile layout changes.
+Fixture tasks require `SERVICE_ROLE_KEY` in the Cypress Node process and refuse non-local
+HTTP origins. The key is never put in Cypress browser configuration; generated accounts
+send no email, and cleanup verifies their ownership and removal even after a failed run.
+
+The `characters/skillProgression.cy.ts` spec creates an official Fighter/Skill Mastery
+fixture through the local API, runs the real operations worker, and checks master Medicine
+and its earlier expert-increase selector on desktop and mobile. The engine regression
+suite also covers Medic, repeated mastery, source-level caps, removal/regrant and creature
+store isolation.
+
 The same suite runs in CI on every PR via the `e2e` workflow. See [`.github/workflows/e2e.yml`](https://github.com/wanderers-guide/wanderers-guide/blob/main/.github/workflows/e2e.yml).
 
 ## Running the API tests
@@ -221,6 +381,14 @@ npm run test:api                          # cd supabase && deno test --allow-net
 ```
 
 The harness covers the auth-routing flow plus one representative test per pattern (find / create / update / delete / search), so a regression in the shared `connect()` wrapper or one of those patterns shows up immediately.
+
+## Release verification
+
+Run `npm run test:release` and `npm run release:check` from the repository root
+after installing frontend dependencies. CI runs these checks and archives the
+function/schema manifest. The production content snapshot refreshes weekly or by
+manual dispatch, independently of code pushes. See [Release and recovery](/releases)
+for the read-only production gate, migration baseline and rollout order.
 
 ## Troubleshooting
 
@@ -245,3 +413,17 @@ The harness covers the auth-routing flow plus one representative test per patter
 <Note>
 Curious about how to contribute? Check out our [Discord server](https://discord.com/invite/FxsFZVvedr) and [GitHub issues](https://github.com/wanderers-guide/wanderers-guide/issues)!
 </Note>
+
+
+## Infrastructure regression checks
+
+With the local Docker database running and migrations applied, run
+`npm run test:authorization` to check denied profile/moderation writes, character
+ownership, signup and trusted writes. Its synthetic accounts and changes roll back.
+`npm --prefix frontend run test:infra` covers cache generations, partial-content
+failures, account recovery and nested save conflicts. `npm run test:release` also
+checks semantic health-probe behavior without reaching production.
+
+The optional browser diagnostic intake accepts only bounded categories and a build
+revision. Vite embeds the Git commit (Render uses `RENDER_GIT_COMMIT`). Raw error
+messages, character data and tokens are never part of that request.

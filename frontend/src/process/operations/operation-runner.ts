@@ -1,4 +1,4 @@
-import { fetchContentById } from '@content/content-store';
+import { fetchContentById, getCachedContent } from '@content/content-store';
 import { AbilityBlock, Item, Language, Spell, Trait } from '@schemas/content';
 import {
   ConditionCheckData,
@@ -27,7 +27,7 @@ import {
   OperationSendNotification,
   OperationSetValue,
 } from '@schemas/operations';
-import { ProficiencyType, StoreID, VariableNum, VariableProf } from '@schemas/variables';
+import { ProficiencyType, StoreID, VariableListStr, VariableNum, VariableProf } from '@schemas/variables';
 import {
   addVariable,
   addVariableBonus,
@@ -36,6 +36,16 @@ import {
   getVariable,
   getVariables,
   setVariable,
+  beginVariableEffects,
+  getVariableEffectScopes,
+  areVariableEffectScopesActive,
+  withVariableEffectScope,
+  withVariableEffectScopes,
+  withSkillEffectContext,
+  getSkillEffectContext,
+  removeVariableEffects,
+  filterVariableList,
+  VariableEffectScope,
 } from '@variables/variable-manager';
 import {
   compileProficiencyType,
@@ -53,6 +63,13 @@ import {
 import { SelectionTrack } from './selection-tree';
 import { isEqual } from 'lodash-es';
 import { throwError } from '@utils/error-handling';
+import {
+  grantLanguage,
+  parseLanguageOverride,
+  removeGrantedLanguage,
+  replaceLanguages,
+  resolveLanguageOverride,
+} from './language-operations';
 
 // import { hideNotification, showNotification } from '@mantine/notifications';
 // import { displayError } from '@utils/notifications';
@@ -72,6 +89,49 @@ function displayError(message: string, debugOnly?: boolean) {
 
 ///
 
+/** Generous hard limits bound malformed content even when Web Workers are unavailable. */
+const MAX_OPERATION_DEPTH = 64;
+const MAX_OPERATION_WORK = 100_000;
+type OperationTraversal = { depth: number; work: number };
+const operationTraversals = new WeakMap<ReturnType<typeof getVariables>, OperationTraversal>();
+
+/** Track work across every source and all three passes, resetting with the variable store. */
+function getOperationTraversal(varId: StoreID): OperationTraversal {
+  const variables = getVariables(varId);
+  let traversal = operationTraversals.get(variables);
+  if (!traversal) {
+    traversal = { depth: 0, work: 0 };
+    operationTraversals.set(variables, traversal);
+  }
+  return traversal;
+}
+
+/**
+ * Own a content grant and its descendants by occurrence, separate from its human-readable source label.
+ * Only the active ancestor path is checked for cycles; another branch may grant the same content.
+ */
+export async function withContentGrant<T>(
+  varId: StoreID,
+  key: string,
+  content: string,
+  options: OperationOptions | undefined,
+  run: () => Promise<T>
+): Promise<T | undefined> {
+  const ancestors = getVariableEffectScopes(varId);
+  if (ancestors.some((scope) => scope.content === content)) {
+    throw new Error(`Cyclic content grant: ${[...ancestors.map((scope) => scope.content), content].join(' -> ')}`);
+  }
+  const occurrence = `${ancestors.at(-1)?.key ?? 'root'}/${key}`;
+  return withVariableEffectScope(
+    varId,
+    occurrence,
+    content,
+    !options?.doOnlyValueCreation && !options?.doOnlyConditionals,
+    run
+  );
+}
+
+/** Execute ordered operations with bounded recursion and source-owned variable effects. */
 export async function runOperations(
   varId: StoreID,
   selectionTrack: SelectionTrack,
@@ -79,6 +139,10 @@ export async function runOperations(
   options?: OperationOptions,
   sourceLabel?: string
 ): Promise<OperationResult[]> {
+  beginVariableEffects(varId);
+  const traversal = getOperationTraversal(varId);
+  if (traversal.depth >= MAX_OPERATION_DEPTH)
+    throw new Error('Content operations exceed the maximum nesting depth (64).');
   const runOp = async (operation: Operation): Promise<OperationResult> => {
     // Value creation
     if (options?.doOnlyValueCreation) {
@@ -135,6 +199,10 @@ export async function runOperations(
     // Normal
     if (options?.doConditionals && operation.type === 'conditional') {
       return await runConditional(varId, selectionTrack, operation, options, sourceLabel);
+    } else if (options?.doConditionals && operation.type === 'createValue') {
+      // Conditional branches are chosen after the creation pass. Create their
+      // variables only when that branch runs, before its following adjustments.
+      return await runCreateValue(varId, operation, sourceLabel);
     } else if (operation.type === 'adjValue') {
       return await runAdjValue(varId, operation, selectionTrack, options, sourceLabel);
     } else if (operation.type === 'setValue') {
@@ -152,7 +220,7 @@ export async function runOperations(
     } else if (operation.type === 'giveTrait') {
       return await runGiveTrait(varId, operation, sourceLabel);
     } else if (operation.type === 'giveSpell') {
-      return await runGiveSpell(varId, operation, sourceLabel);
+      return await runGiveSpell(varId, selectionTrack, operation, options, sourceLabel);
     } else if (operation.type === 'giveSpellSlot') {
       return await runGiveSpellSlot(varId, operation, sourceLabel);
     } else if (operation.type === 'defineCastingSource') {
@@ -181,13 +249,36 @@ export async function runOperations(
   };
 
   const results: OperationResult[] = [];
-  for (const operation of operations) {
-    results.push(await runOp(operation));
+  traversal.depth++;
+  try {
+    const orderedOperations = operations.map((operation, index) => ({ operation, index }));
+    if (options?.doOnlyConditionals || options?.doConditionals) {
+      // Active branches create their local variables before proficiency guards;
+      // guards then precede sibling effects that read their granted proficiency.
+      orderedOperations.sort(
+        (left, right) =>
+          Number(right.operation.type === 'createValue') - Number(left.operation.type === 'createValue') ||
+          Number(getSelfGrantProficiencyVariables(right.operation).size > 0) -
+            Number(getSelfGrantProficiencyVariables(left.operation).size > 0)
+      );
+    }
+    for (const { operation, index } of orderedOperations) {
+      if (!areVariableEffectScopesActive(getVariableEffectScopes(varId))) break;
+      if (++traversal.work > MAX_OPERATION_WORK)
+        throw new Error('Content operations exceed the execution work limit (100000).');
+      const scope = getVariableEffectScopes(varId).at(-1);
+      const occurrence = scope ? `${scope.key}@${scope.revision}` : 'root';
+      results[index] = await withSkillEffectContext(
+        varId,
+        `${occurrence}/${selectionTrack.path}/${operation.id}`,
+        options?.sourceLevel ?? getVariable<VariableNum>(varId, 'LEVEL')?.value ?? 1,
+        () => runOp(operation)
+      );
+    }
+    return results;
+  } finally {
+    traversal.depth--;
   }
-
-  // Alt. Faster as it runs in parallel but doesn't have consistent execution order
-  // await Promise.all(operations.map(runOp));
-  return results;
 }
 
 async function runSelect(
@@ -200,10 +291,10 @@ async function runSelect(
   let optionList: ObjectWithUUID[] = [];
 
   if (operation.data.modeType === 'FILTERED' && operation.data.optionsFilters) {
-    optionList = await determineFilteredSelectionList('CHARACTER', operation.id, operation.data.optionsFilters);
+    optionList = await determineFilteredSelectionList(varId, operation.id, operation.data.optionsFilters);
   } else if (operation.data.modeType === 'PREDEFINED' && operation.data.optionsPredefined) {
     optionList = await determinePredefinedSelectionList(
-      'CHARACTER',
+      varId,
       operation.id,
       operation.data.optionType,
       operation.data.optionsPredefined
@@ -217,7 +308,7 @@ async function runSelect(
   let foundSkills: string[] = [];
   for (const option of optionList) {
     if (option.variable) {
-      const variable = getVariable('CHARACTER', option.variable);
+      const variable = getVariable(varId, option.variable);
       if (variable?.type === 'prof' && variable.name.startsWith('SKILL_')) {
         foundSkills.push(variable.name);
       }
@@ -225,13 +316,15 @@ async function runSelect(
   }
   const skillAdjustment =
     optionList.length > 0 && foundSkills.length === optionList.length ? optionList[0]?.value?.value : undefined;
+  const skillContext = getSkillEffectContext(varId);
+  if (skillAdjustment && skillContext) {
+    optionList = optionList.map((option) => ({ ...option, _skill_context: skillContext }));
+  }
 
   // Find selected option
   if (selectionTrack.node && selectionTrack.node.value) {
     let selectedOption = optionList.find((option) => option._select_uuid === selectionTrack.node?.value);
-    if (selectedOption) {
-      updateVariables(varId, operation, selectedOption, sourceLabel, options);
-    } else if (operation.data.optionType === 'ABILITY_BLOCK') {
+    if (!selectedOption && operation.data.optionType === 'ABILITY_BLOCK') {
       // It's probably a feat we selected from an archetype so it's not in the list, let's fetch it
       const abilityBlock = await fetchContentById<AbilityBlock>('ability-block', parseInt(selectionTrack.node.value));
       if (!abilityBlock) {
@@ -246,9 +339,8 @@ async function runSelect(
           _select_uuid: `${abilityBlock.id}`,
           _content_type: 'ability-block',
         } satisfies ObjectWithUUID;
-        updateVariables(varId, operation, selectedOption, sourceLabel, options);
       }
-    } else {
+    } else if (!selectedOption) {
       /*
         We don't display an error on value creation because, with trait giving, we can have values
         that give access to other selection options. In the later passthroughs, they find the options
@@ -269,17 +361,31 @@ async function runSelect(
     }
 
     if (selectedOption) {
-      // Run the operations of the selected option
-      const subOperations = await extendOperations(selectedOption, selectedOption.operations);
-      if (subOperations.length > 0 && selectedOption.type !== 'mode') {
-        const subNode = selectionTrack.node?.children[selectedOption._select_uuid];
-        results = await runOperations(
+      const option = selectedOption;
+      const runSelected = async (): Promise<void> => {
+        await updateVariables(varId, operation, option, sourceLabel, options);
+        const subOperations = await extendOperations(option, option.operations);
+        if (subOperations.length > 0 && option.type !== 'mode') {
+          const subNode = selectionTrack.node?.children[option._select_uuid];
+          results = await runOperations(
+            varId,
+            { path: `${selectionTrack.path}_${subNode?.value}`, node: subNode },
+            subOperations,
+            options,
+            operation.data.optionType === 'CUSTOM' ? sourceLabel : (option.name ?? 'Unknown')
+          );
+        }
+      };
+      if (operation.data.optionType === 'ABILITY_BLOCK' || operation.data.optionType === 'SPELL') {
+        await withContentGrant(
           varId,
-          { path: `${selectionTrack.path}_${subNode?.value}`, node: subNode },
-          subOperations,
+          `${selectionTrack.path}/${operation.id}/${option.id}`,
+          `${operation.data.optionType === 'SPELL' ? 'spell' : 'ability-block'}:${option.id}`,
           options,
-          operation.data.optionType === 'CUSTOM' ? sourceLabel : (selectedOption.name ?? 'Unknown')
+          runSelected
         );
+      } else {
+        await runSelected();
       }
     }
 
@@ -321,6 +427,7 @@ async function updateVariables(
   if (options && options.doOnlyValueCreation) {
     // Create variables based on the selected option
     if (operation.data.optionType === 'TRAIT') {
+      let isCharacterTrait = false;
       if (selectedOption.meta_data?.class_trait) {
         addVariable(
           varId,
@@ -329,6 +436,7 @@ async function updateVariables(
           selectedOption.id,
           sourceLabel
         );
+        isCharacterTrait = true;
       } else if (selectedOption.meta_data?.archetype_trait) {
         addVariable(
           varId,
@@ -337,6 +445,7 @@ async function updateVariables(
           selectedOption.id,
           sourceLabel
         );
+        isCharacterTrait = true;
       } else if (
         selectedOption.meta_data?.ancestry_trait ||
         selectedOption.meta_data?.creature_trait ||
@@ -349,7 +458,9 @@ async function updateVariables(
           selectedOption.id,
           sourceLabel
         );
+        isCharacterTrait = true;
       }
+      if (isCharacterTrait) adjVariable(varId, 'TRAIT_NAMES', selectedOption.name.toUpperCase(), sourceLabel);
     }
     return;
   }
@@ -378,8 +489,7 @@ async function updateVariables(
       throwError(`Invalid ability block type: ${selectedOption.type}`);
     }
   } else if (operation.data.optionType === 'LANGUAGE') {
-    adjVariable(varId, 'LANGUAGE_IDS', `${selectedOption.id}`, sourceLabel);
-    adjVariable(varId, 'LANGUAGE_NAMES', selectedOption.name.toUpperCase(), sourceLabel);
+    grantLanguage(varId, { id: selectedOption.id, name: selectedOption.name }, sourceLabel);
   } else if (operation.data.optionType === 'SPELL') {
     adjVariable(varId, 'SPELL_IDS', `${selectedOption.id}`, sourceLabel);
     adjVariable(varId, 'SPELL_NAMES', selectedOption.name.toUpperCase(), sourceLabel);
@@ -507,38 +617,149 @@ async function runSetValue(
   operation: OperationSetValue,
   sourceLabel?: string
 ): Promise<OperationResult> {
+  if (operation.data.variable === 'LANGUAGE_IDS' || operation.data.variable === 'LANGUAGE_NAMES') {
+    deferredOperations.push({
+      type: 'languages',
+      varId,
+      data: operation.data,
+      sourceLabel,
+      scopes: getVariableEffectScopes(varId),
+    });
+    return null;
+  }
   setVariable(varId, operation.data.variable, operation.data.value, sourceLabel);
   return null;
 }
 
 /**
- * Variable bindings queued during execution, resolved once every round has run.
+ * Explicit final writes share one execution lifecycle. Language overrides replace
+ * ancestry and other grants; variable bindings then read those final values.
  * Bindings copy another variable's FINAL value (e.g. Quick Climb's "climb Speed equal
  * to your land Speed"), so they can't resolve mid-execution — and the old setTimeout
  * deferral was lost entirely under worker execution, because the store is exported
  * back to the main thread before the timer ever fires.
  */
-let pendingBinds: {
-  varId: StoreID;
-  variable: string;
-  value: OperationBindValue['data']['value'];
-  sourceLabel?: string;
-}[] = [];
+type DeferredOperation = { scopes: VariableEffectScope[] } & (
+  | {
+      type: 'bind';
+      varId: StoreID;
+      variable: string;
+      value: OperationBindValue['data']['value'];
+      sourceLabel?: string;
+    }
+  | {
+      type: 'languages';
+      varId: StoreID;
+      data: OperationSetValue['data'];
+      sourceLabel?: string;
+    }
+);
+let deferredOperations: DeferredOperation[] = [];
+type DeferredBinding = Extract<DeferredOperation, { type: 'bind' }>;
 
-/** Drops queued bindings from a previous (possibly aborted) execution. */
-export function clearPendingBinds() {
-  pendingBinds = [];
-}
-
-/** Applies all queued bindings against the now-final variable stores. */
-export function resolvePendingBinds() {
-  for (const bind of pendingBinds) {
-    const bindValue = getVariable(bind.value.storeId, bind.value.variable);
-    if (bindValue) {
-      setVariable(bind.varId, bind.variable, bindValue.value, bind.sourceLabel);
+/** Resolve final-value dependencies without depending on source traversal order or call-stack depth. */
+async function resolveBindings(pending: DeferredOperation[]): Promise<void> {
+  const keyFor = (storeId: StoreID, variable: string): string => JSON.stringify([storeId, variable]);
+  const bindings = new Map<string, DeferredBinding[]>();
+  for (const operation of pending) {
+    if (
+      operation.type === 'bind' &&
+      getVariable(operation.varId, operation.variable) &&
+      getVariable(operation.value.storeId, operation.value.variable)
+    ) {
+      const key = keyFor(operation.varId, operation.variable);
+      // Self-copies cannot replace an earlier source or introduce a dependency.
+      if (key === keyFor(operation.value.storeId, operation.value.variable)) continue;
+      const writes = bindings.get(key) ?? [];
+      writes.push(operation);
+      bindings.set(key, writes);
     }
   }
-  pendingBinds = [];
+  const resolved = new Set<string>();
+  const ordered: string[] = [];
+  for (const key of bindings.keys()) {
+    if (resolved.has(key)) continue;
+    const stack = [{ key, next: 0 }];
+    const visiting = new Set([key]);
+    while (stack.length > 0) {
+      const current = stack[stack.length - 1];
+      const writes = bindings.get(current.key)!;
+      if (current.next === writes.length) {
+        ordered.push(current.key);
+        resolved.add(current.key);
+        visiting.delete(current.key);
+        stack.pop();
+        continue;
+      }
+      const write = writes[current.next++];
+      const dependency = keyFor(write.value.storeId, write.value.variable);
+      if (!bindings.has(dependency) || resolved.has(dependency)) continue;
+      if (visiting.has(dependency)) {
+        const start = stack.findIndex((entry) => entry.key === dependency);
+        const cycle = [...stack.slice(start).map((entry) => entry.key), dependency].map((entry) => {
+          const binding = bindings.get(entry)![0];
+          return binding.varId + '.' + binding.variable;
+        });
+        throw new Error('Cyclic variable binding: ' + cycle.join(' -> '));
+      }
+      visiting.add(dependency);
+      stack.push({ key: dependency, next: 0 });
+    }
+  }
+  // Validate the complete graph before applying any binding. A cycle must never
+  // publish a partial result as a successful character or companion calculation.
+  for (const key of ordered) {
+    // Preserve every authored assignment and its provenance. The existing setter
+    // owns maximum-speed/HP rules, proficiency metadata, and ordinary replacement.
+    for (const binding of bindings.get(key)!) {
+      const source = getVariable(binding.value.storeId, binding.value.variable);
+      if (!source) continue;
+      await withVariableEffectScopes(binding.varId, binding.scopes, async () => {
+        setVariable(binding.varId, binding.variable, source.value, binding.sourceLabel);
+      });
+    }
+  }
+}
+
+/** Drops deferred writes from a previous (possibly aborted) execution. */
+export function clearDeferredOperations(): void {
+  deferredOperations = [];
+}
+
+/** Apply explicit language replacements after grants, then bindings against their resolved final source values. */
+export async function resolveDeferredOperations(): Promise<string[]> {
+  const pending: DeferredOperation[] = deferredOperations.filter((operation) =>
+    areVariableEffectScopesActive(operation.scopes)
+  );
+  deferredOperations = [];
+  const replacements: { varId: StoreID; languages: Language[]; sourceLabel?: string; scopes: VariableEffectScope[] }[] =
+    [];
+  const errors: string[] = [];
+  for (const operation of pending) {
+    if (operation.type !== 'languages') continue;
+    try {
+      const override = parseLanguageOverride(operation.data.variable, operation.data.value);
+      if (!override) continue;
+      replacements.push({
+        varId: operation.varId,
+        languages: await resolveLanguageOverride(operation.varId, override),
+        sourceLabel: operation.sourceLabel,
+        scopes: operation.scopes,
+      });
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      errors.push(
+        `Language override${operation.sourceLabel ? ` from ${operation.sourceLabel}` : ''} was not applied: ${detail}`
+      );
+    }
+  }
+  for (const replacement of replacements) {
+    await withVariableEffectScopes(replacement.varId, replacement.scopes, async () => {
+      replaceLanguages(replacement.varId, replacement.languages, replacement.sourceLabel);
+    });
+  }
+  await resolveBindings(pending);
+  return errors;
 }
 
 async function runBindValue(
@@ -546,7 +767,9 @@ async function runBindValue(
   operation: OperationBindValue,
   sourceLabel?: string
 ): Promise<OperationResult> {
-  pendingBinds.push({
+  deferredOperations.push({
+    type: 'bind',
+    scopes: getVariableEffectScopes(varId),
     varId,
     variable: operation.data.variable,
     value: operation.data.value,
@@ -600,53 +823,63 @@ async function runGiveAbilityBlock(
     return null;
   }
 
-  if (!options?.doOnlyValueCreation && !options?.doOnlyConditionals) {
-    if (operation.data.type === 'feat') {
-      adjVariable(varId, 'FEAT_IDS', `${abilityBlock.id}`, sourceLabel);
-      adjVariable(varId, 'FEAT_NAMES', abilityBlock.name.toUpperCase(), sourceLabel);
-    } else if (operation.data.type === 'class-feature') {
-      adjVariable(varId, 'CLASS_FEATURE_IDS', `${abilityBlock.id}`, sourceLabel);
-      adjVariable(varId, 'CLASS_FEATURE_NAMES', abilityBlock.name.toUpperCase(), sourceLabel);
-    } else if (operation.data.type === 'sense') {
-      adjVariable(varId, 'SENSE_IDS', `${abilityBlock.id}`, sourceLabel);
-      adjVariable(varId, 'SENSE_NAMES', abilityBlock.name.toUpperCase(), sourceLabel);
-    } else if (operation.data.type === 'heritage') {
-      adjVariable(varId, 'HERITAGE_IDS', `${abilityBlock.id}`, sourceLabel);
-      adjVariable(varId, 'HERITAGE_NAMES', abilityBlock.name.toUpperCase(), sourceLabel);
-    } else if (operation.data.type === 'physical-feature') {
-      adjVariable(varId, 'PHYSICAL_FEATURE_IDS', `${abilityBlock.id}`, sourceLabel);
-      adjVariable(varId, 'PHYSICAL_FEATURE_NAMES', abilityBlock.name.toUpperCase(), sourceLabel);
-    } else if (operation.data.type === 'mode') {
-      adjVariable(varId, 'MODE_IDS', `${abilityBlock.id}`, sourceLabel);
-      adjVariable(varId, 'MODE_NAMES', abilityBlock.name.toUpperCase(), sourceLabel);
-    }
-  }
-
-  let results: OperationResult[] = [];
-  const subOperations = await extendOperations(abilityBlock, abilityBlock.operations ?? undefined);
-  if (subOperations.length > 0 && operation.data.type !== 'mode') {
-    const subNode = selectionTrack.node?.children[operation.id];
-    results = await runOperations(
+  return (
+    (await withContentGrant(
       varId,
-      { path: `${selectionTrack.path}_${subNode?.value}`, node: subNode },
-      subOperations,
+      `${selectionTrack.path}/${operation.id}`,
+      `ability-block:${abilityBlock.id}`,
       options,
-      abilityBlock.type === 'feat' || abilityBlock.type === 'class-feature'
-        ? `${abilityBlock.name} (Lvl. ${abilityBlock.level})`
-        : abilityBlock.name
-    );
-  }
+      async () => {
+        if (!options?.doOnlyValueCreation && !options?.doOnlyConditionals) {
+          if (operation.data.type === 'feat') {
+            adjVariable(varId, 'FEAT_IDS', `${abilityBlock.id}`, sourceLabel);
+            adjVariable(varId, 'FEAT_NAMES', abilityBlock.name.toUpperCase(), sourceLabel);
+          } else if (operation.data.type === 'class-feature') {
+            adjVariable(varId, 'CLASS_FEATURE_IDS', `${abilityBlock.id}`, sourceLabel);
+            adjVariable(varId, 'CLASS_FEATURE_NAMES', abilityBlock.name.toUpperCase(), sourceLabel);
+          } else if (operation.data.type === 'sense') {
+            adjVariable(varId, 'SENSE_IDS', `${abilityBlock.id}`, sourceLabel);
+            adjVariable(varId, 'SENSE_NAMES', abilityBlock.name.toUpperCase(), sourceLabel);
+          } else if (operation.data.type === 'heritage') {
+            adjVariable(varId, 'HERITAGE_IDS', `${abilityBlock.id}`, sourceLabel);
+            adjVariable(varId, 'HERITAGE_NAMES', abilityBlock.name.toUpperCase(), sourceLabel);
+          } else if (operation.data.type === 'physical-feature') {
+            adjVariable(varId, 'PHYSICAL_FEATURE_IDS', `${abilityBlock.id}`, sourceLabel);
+            adjVariable(varId, 'PHYSICAL_FEATURE_NAMES', abilityBlock.name.toUpperCase(), sourceLabel);
+          } else if (operation.data.type === 'mode') {
+            adjVariable(varId, 'MODE_IDS', `${abilityBlock.id}`, sourceLabel);
+            adjVariable(varId, 'MODE_NAMES', abilityBlock.name.toUpperCase(), sourceLabel);
+          }
+        }
 
-  return {
-    result: {
-      source: {
-        ...abilityBlock,
-        _select_uuid: operation.id,
-        _content_type: 'ability-block',
-      },
-      results,
-    },
-  };
+        let results: OperationResult[] = [];
+        const subOperations = await extendOperations(abilityBlock, abilityBlock.operations ?? undefined);
+        if (subOperations.length > 0 && operation.data.type !== 'mode') {
+          const subNode = selectionTrack.node?.children[operation.id];
+          results = await runOperations(
+            varId,
+            { path: `${selectionTrack.path}_${subNode?.value}`, node: subNode },
+            subOperations,
+            options,
+            abilityBlock.type === 'feat' || abilityBlock.type === 'class-feature'
+              ? `${abilityBlock.name} (Lvl. ${abilityBlock.level})`
+              : abilityBlock.name
+          );
+        }
+
+        return {
+          result: {
+            source: {
+              ...abilityBlock,
+              _select_uuid: operation.id,
+              _content_type: 'ability-block',
+            },
+            results,
+          },
+        };
+      }
+    )) ?? null
+  );
 }
 
 async function runGiveLanguage(
@@ -661,8 +894,7 @@ async function runGiveLanguage(
     return null;
   }
 
-  adjVariable(varId, 'LANGUAGE_IDS', `${language.id}`, sourceLabel);
-  adjVariable(varId, 'LANGUAGE_NAMES', language.name.toUpperCase(), sourceLabel);
+  grantLanguage(varId, language, sourceLabel);
   return null;
 }
 
@@ -696,10 +928,13 @@ async function runGiveTrait(
   }
 
   // Create variables because we run variable creation first
+  let isCharacterTrait = false;
   if (trait.meta_data?.class_trait) {
     addVariable(varId, 'num', labelToVariable(`TRAIT_CLASS_${trait.name}_IDS`), trait.id, sourceLabel);
+    isCharacterTrait = true;
   } else if (trait.meta_data?.archetype_trait) {
     addVariable(varId, 'num', labelToVariable(`TRAIT_ARCHETYPE_${trait.name}_IDS`), trait.id, sourceLabel);
+    isCharacterTrait = true;
   } else if (
     trait.meta_data?.ancestry_trait ||
     trait.meta_data?.creature_trait ||
@@ -707,6 +942,7 @@ async function runGiveTrait(
     trait.meta_data?.companion_type_trait
   ) {
     addVariable(varId, 'num', labelToVariable(`TRAIT_ANCESTRY_${trait.name}_IDS`), trait.id, sourceLabel);
+    isCharacterTrait = true;
   } else {
     console.warn(
       `Trait is not a class, archetype, ancestry, or creature trait so it can't be given to a character: ${trait.name} (${trait.id})`
@@ -715,13 +951,16 @@ async function runGiveTrait(
       `Trait is not a class, archetype, ancestry, or creature trait so it can't be given to a character: ${trait.name} (${trait.id})`
     );
   }
+  if (isCharacterTrait) adjVariable(varId, 'TRAIT_NAMES', trait.name.toUpperCase(), sourceLabel);
 
   return null;
 }
 
 async function runGiveSpell(
   varId: StoreID,
+  selectionTrack: SelectionTrack,
   operation: OperationGiveSpell,
+  options?: OperationOptions,
   sourceLabel?: string
 ): Promise<OperationResult> {
   if (operation.data.spellId === -1) return null;
@@ -731,38 +970,42 @@ async function runGiveSpell(
     return null;
   }
 
-  adjVariable(varId, 'SPELL_IDS', `${spell.id}`, sourceLabel);
-  adjVariable(varId, 'SPELL_NAMES', spell.name.toUpperCase(), sourceLabel);
+  return (
+    (await withContentGrant(varId, `${selectionTrack.path}/${operation.id}`, `spell:${spell.id}`, options, async () => {
+      adjVariable(varId, 'SPELL_IDS', `${spell.id}`, sourceLabel);
+      adjVariable(varId, 'SPELL_NAMES', spell.name.toUpperCase(), sourceLabel);
 
-  adjVariable(
-    varId,
-    'SPELL_DATA',
-    JSON.stringify({
-      spellId: spell.id,
-      type: operation.data.type,
-      castingSource: operation.data.castingSource,
-      rank: operation.data.rank,
-      tradition: operation.data.tradition,
-      casts: operation.data.casts,
-    } satisfies GiveSpellData),
-    sourceLabel
-  );
+      adjVariable(
+        varId,
+        'SPELL_DATA',
+        JSON.stringify({
+          spellId: spell.id,
+          type: operation.data.type,
+          castingSource: operation.data.castingSource,
+          rank: operation.data.rank,
+          tradition: operation.data.tradition,
+          casts: operation.data.casts,
+        } satisfies GiveSpellData),
+        sourceLabel
+      );
 
-  if (operation.data.type === 'INNATE') {
-    /*
+      if (operation.data.type === 'INNATE') {
+        /*
       When you gain an innate spell, you become trained in the spell attack modifier
       and spell DC statistics. At 12th level, these proficiencies increase to expert.
     */
-    adjVariable(varId, 'SPELL_ATTACK', { value: 'T', increases: 0 }, sourceLabel);
-    adjVariable(varId, 'SPELL_DC', { value: 'T', increases: 0 }, sourceLabel);
-    const level = getVariable<VariableNum>(varId, 'LEVEL')?.value;
-    if (level && level >= 12) {
-      adjVariable(varId, 'SPELL_ATTACK', { value: 'E', increases: 0 }, sourceLabel);
-      adjVariable(varId, 'SPELL_DC', { value: 'E', increases: 0 }, sourceLabel);
-    }
-  }
+        adjVariable(varId, 'SPELL_ATTACK', { value: 'T', increases: 0 }, sourceLabel);
+        adjVariable(varId, 'SPELL_DC', { value: 'T', increases: 0 }, sourceLabel);
+        const level = getVariable<VariableNum>(varId, 'LEVEL')?.value;
+        if (level && level >= 12) {
+          adjVariable(varId, 'SPELL_ATTACK', { value: 'E', increases: 0 }, sourceLabel);
+          adjVariable(varId, 'SPELL_DC', { value: 'E', increases: 0 }, sourceLabel);
+        }
+      }
 
-  return null;
+      return null;
+    })) ?? null
+  );
 }
 
 async function runGiveSpellSlot(
@@ -836,6 +1079,31 @@ async function runSendNotification(
   return null;
 }
 
+/** Remove identity and display membership together, preserving another record that has the same name. */
+function removeContentMembership(
+  varId: StoreID,
+  prefix: string,
+  content: Pick<AbilityBlock, 'id' | 'name'>,
+  type: 'ability-block' | 'spell',
+  sourceLabel?: string
+): void {
+  const name = content.name.toUpperCase();
+  const namesakes = new Set(
+    getCachedContent<AbilityBlock | Spell>(type)
+      .filter((row) => row.id !== content.id && row.name.toUpperCase() === name)
+      .map((row) => `${row.id}`)
+  );
+  filterVariableList(varId, `${prefix}_IDS`, (id) => id !== `${content.id}`, sourceLabel);
+  filterVariableList(
+    varId,
+    `${prefix}_NAMES`,
+    (value) =>
+      value !== name ||
+      (getVariable<VariableListStr>(varId, `${prefix}_IDS`)?.value ?? []).some((id) => namesakes.has(id)),
+    sourceLabel
+  );
+}
+
 async function runRemoveAbilityBlock(
   varId: StoreID,
   operation: OperationRemoveAbilityBlock,
@@ -848,89 +1116,21 @@ async function runRemoveAbilityBlock(
     return null;
   }
 
-  const getVariableList = (varId: StoreID, variableName: string) => {
-    return (getVariable(varId, variableName)?.value ?? []) as string[];
-  };
-
-  if (operation.data.type === 'feat') {
-    setVariable(
-      varId,
-      'FEAT_IDS',
-      getVariableList(varId, 'FEAT_IDS').filter((id) => id !== `${abilityBlock.id}`),
-      sourceLabel
-    );
-    setVariable(
-      varId,
-      'FEAT_NAMES',
-      getVariableList(varId, 'FEAT_NAMES').filter((name) => name !== abilityBlock.name.toUpperCase()),
-      sourceLabel
-    );
-  } else if (operation.data.type === 'class-feature') {
-    setVariable(
-      varId,
-      'CLASS_FEATURE_IDS',
-      getVariableList(varId, 'CLASS_FEATURE_IDS').filter((id) => id !== `${abilityBlock.id}`),
-      sourceLabel
-    );
-    setVariable(
-      varId,
-      'CLASS_FEATURE_NAMES',
-      getVariableList(varId, 'CLASS_FEATURE_NAMES').filter((name) => name !== abilityBlock.name.toUpperCase()),
-      sourceLabel
-    );
-  } else if (operation.data.type === 'sense') {
-    setVariable(
-      varId,
-      'SENSE_IDS',
-      getVariableList(varId, 'SENSE_IDS').filter((id) => id !== `${abilityBlock.id}`),
-      sourceLabel
-    );
-    setVariable(
-      varId,
-      'SENSE_NAMES',
-      getVariableList(varId, 'SENSE_NAMES').filter((name) => name !== abilityBlock.name.toUpperCase()),
-      sourceLabel
-    );
-  } else if (operation.data.type === 'heritage') {
-    setVariable(
-      varId,
-      'HERITAGE_IDS',
-      getVariableList(varId, 'HERITAGE_IDS').filter((id) => id !== `${abilityBlock.id}`),
-      sourceLabel
-    );
-    setVariable(
-      varId,
-      'HERITAGE_NAMES',
-      getVariableList(varId, 'HERITAGE_NAMES').filter((name) => name !== abilityBlock.name.toUpperCase()),
-      sourceLabel
-    );
-  } else if (operation.data.type === 'physical-feature') {
-    setVariable(
-      varId,
-      'PHYSICAL_FEATURE_IDS',
-      getVariableList(varId, 'PHYSICAL_FEATURE_IDS').filter((id) => id !== `${abilityBlock.id}`),
-      sourceLabel
-    );
-    setVariable(
-      varId,
-      'PHYSICAL_FEATURE_NAMES',
-      getVariableList(varId, 'PHYSICAL_FEATURE_NAMES').filter((name) => name !== abilityBlock.name.toUpperCase()),
-      sourceLabel
-    );
-  } else if (operation.data.type === 'mode') {
-    setVariable(
-      varId,
-      'MODE_IDS',
-      getVariableList(varId, 'MODE_IDS').filter((id) => id !== `${abilityBlock.id}`),
-      sourceLabel
-    );
-    setVariable(
-      varId,
-      'MODE_NAMES',
-      getVariableList(varId, 'MODE_NAMES').filter((name) => name !== abilityBlock.name.toUpperCase()),
-      sourceLabel
-    );
+  removeVariableEffects(varId, `ability-block:${abilityBlock.id}`);
+  if (operation.data.type === 'mode') {
+    filterVariableList(varId, 'ACTIVE_MODES', (mode) => mode !== labelToVariable(abilityBlock.name), sourceLabel);
   }
+
+  const prefix: Record<string, string> = {
+    feat: 'FEAT',
+    'class-feature': 'CLASS_FEATURE',
+    sense: 'SENSE',
+    heritage: 'HERITAGE',
+    'physical-feature': 'PHYSICAL_FEATURE',
+    mode: 'MODE',
+  };
+  const variablePrefix = prefix[operation.data.type];
+  if (variablePrefix) removeContentMembership(varId, variablePrefix, abilityBlock, 'ability-block', sourceLabel);
   return null;
 }
 
@@ -946,22 +1146,7 @@ async function runRemoveLanguage(
     return null;
   }
 
-  const getVariableList = (variableName: string) => {
-    return (getVariable(varId, variableName)?.value ?? []) as string[];
-  };
-
-  setVariable(
-    varId,
-    'LANGUAGE_IDS',
-    getVariableList('LANGUAGE_IDS').filter((id) => id !== `${language.id}`),
-    sourceLabel
-  );
-  setVariable(
-    varId,
-    'LANGUAGE_NAMES',
-    getVariableList('LANGUAGE_NAMES').filter((name) => name !== language.name.toUpperCase()),
-    sourceLabel
-  );
+  removeGrantedLanguage(varId, language, sourceLabel);
   return null;
 }
 
@@ -977,23 +1162,35 @@ async function runRemoveSpell(
     return null;
   }
 
-  const getVariableList = (variableName: string) => {
-    return (getVariable(varId, variableName)?.value ?? []) as string[];
-  };
+  removeVariableEffects(varId, `spell:${spell.id}`);
 
-  setVariable(
+  removeContentMembership(varId, 'SPELL', spell, 'spell', sourceLabel);
+  filterVariableList(
     varId,
-    'SPELL_IDS',
-    getVariableList('SPELL_IDS').filter((id) => id !== `${spell.id}`),
-    sourceLabel
-  );
-  setVariable(
-    varId,
-    'SPELL_NAMES',
-    getVariableList('SPELL_NAMES').filter((name) => name !== spell.name.toUpperCase()),
+    'SPELL_DATA',
+    (entry) => {
+      const data: unknown = JSON.parse(entry);
+      return typeof data !== 'object' || data === null || !('spellId' in data) || data.spellId !== spell.id;
+    },
     sourceLabel
   );
   return null;
+}
+
+/** Identify only conditional guards that grant a rank to the proficiency they check. */
+function getSelfGrantProficiencyVariables(operation: Operation): Set<string> {
+  if (operation.type !== 'conditional') return new Set();
+  const checked = new Set((operation.data.conditions ?? []).map((condition) => condition.name));
+  return new Set(
+    [...(operation.data.trueOperations ?? []), ...(operation.data.falseOperations ?? [])]
+      .filter(
+        (op): op is OperationAdjValue =>
+          op.type === 'adjValue' &&
+          checked.has(op.data.variable) &&
+          isProficiencyType((op.data.value as { value?: unknown })?.value)
+      )
+      .map((op) => op.data.variable)
+  );
 }
 
 async function runConditional(
@@ -1011,14 +1208,7 @@ async function runConditional(
   // fires and the increase is consumed reaching the rank the grant should have provided
   // (Medic Dedication at trained + a level-7 increase compiled to expert, not master).
   // Threshold conditions that gate anything else keep the increase-inclusive read below.
-  const selfGrantProfVars = new Set(
-    [...(operation.data.trueOperations ?? []), ...(operation.data.falseOperations ?? [])]
-      .filter(
-        (op): op is OperationAdjValue =>
-          op.type === 'adjValue' && isProficiencyType((op.data.value as { value?: unknown })?.value)
-      )
-      .map((op) => op.data.variable)
-  );
+  const selfGrantProfVars = getSelfGrantProficiencyVariables(operation);
 
   const makeCheck = (check: ConditionCheckData) => {
     let variable = getVariable(varId, check.name);
@@ -1129,18 +1319,21 @@ async function runConditional(
       // fires when the rank is NOT below master). The old maxProficiencyType-based
       // checks returned true on equality for both < and >.
       const rankOf = (prof: ProficiencyType) => getProficiencyTypeValue(prof);
+      // Older condition editors displayed their first rank (U) without persisting
+      // it. Match that displayed default and leave other values unchanged.
+      const threshold = check.value === '' ? 'U' : check.value;
       if (check.operator === 'EQUALS') {
-        return profType === check.value;
+        return profType === threshold;
       } else if (check.operator === 'GREATER_THAN') {
-        return rankOf(profType) > rankOf(check.value as ProficiencyType);
+        return rankOf(profType) > rankOf(threshold as ProficiencyType);
       } else if (check.operator === 'LESS_THAN') {
-        return rankOf(profType) < rankOf(check.value as ProficiencyType);
+        return rankOf(profType) < rankOf(threshold as ProficiencyType);
       } else if (check.operator === 'NOT_EQUALS') {
-        return profType !== check.value;
+        return profType !== threshold;
       } else if (check.operator === 'GREATER_THAN_OR_EQUALS') {
-        return rankOf(profType) >= rankOf(check.value as ProficiencyType);
+        return rankOf(profType) >= rankOf(threshold as ProficiencyType);
       } else if (check.operator === 'LESS_THAN_OR_EQUALS') {
-        return rankOf(profType) <= rankOf(check.value as ProficiencyType);
+        return rankOf(profType) <= rankOf(threshold as ProficiencyType);
       }
     }
     return false;
@@ -1153,6 +1346,23 @@ async function runConditional(
     }
   }
 
+  // A level-gated root/class/ancestry operation is earned when its gate opens, not at the root's level 1.
+  const levelGates = (operation.data.conditions ?? []).filter((check) => check.name === 'LEVEL');
+  let sourceLevel = options?.sourceLevel ?? getVariable<VariableNum>(varId, 'LEVEL')?.value ?? 1;
+  for (const check of levelGates) {
+    const threshold = Number(check.value);
+    if (!Number.isFinite(threshold)) continue;
+    if (isTrue && (check.operator === 'GREATER_THAN_OR_EQUALS' || check.operator === 'EQUALS')) {
+      sourceLevel = Math.max(sourceLevel, Math.ceil(threshold));
+    } else if (isTrue && check.operator === 'GREATER_THAN') {
+      sourceLevel = Math.max(sourceLevel, Math.floor(threshold) + 1);
+    } else if (!isTrue && operation.data.conditions?.length === 1) {
+      // With multiple conditions, a false result does not identify which condition failed.
+      if (check.operator === 'LESS_THAN') sourceLevel = Math.max(sourceLevel, Math.ceil(threshold));
+      if (check.operator === 'LESS_THAN_OR_EQUALS') sourceLevel = Math.max(sourceLevel, Math.floor(threshold) + 1);
+    }
+  }
+
   let results: OperationResult[] = [];
   if (isTrue) {
     results = await runOperations(
@@ -1161,6 +1371,7 @@ async function runConditional(
       operation.data.trueOperations ?? [],
       {
         ...options,
+        sourceLevel,
         doOnlyConditionals: false,
         doConditionals: true,
       },
@@ -1173,6 +1384,7 @@ async function runConditional(
       operation.data.falseOperations ?? [],
       {
         ...options,
+        sourceLevel,
         doOnlyConditionals: false,
         doConditionals: true,
       },

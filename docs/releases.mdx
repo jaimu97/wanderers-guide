@@ -1,0 +1,271 @@
+---
+title: 'Release and recovery'
+description: 'Verify cloud functions and schema compatibility before publishing the frontend'
+---
+
+Wanderer's Guide releases reviewed feature branches to `main`. GitHub Actions
+verifies the code and archives a release manifest. The production frontend is
+served through Render and the API through Supabase project
+`fdrjqcyjklatdrmjdnys`. The Docker `main` function is a self-host router and must
+never be included in the cloud function inventory.
+
+## Release checks
+
+Install frontend dependencies first; the release CLI reuses the repository's
+TypeScript and Zod dependencies. It performs read-only checks and does not deploy,
+apply migrations, repair migration history, or delete remote functions.
+
+```bash
+npm run test:release
+npm run release:check
+npm run release:manifest -- --output /tmp/wg-release-manifest.json
+npm run release:verify -- --project-ref fdrjqcyjklatdrmjdnys --output /tmp/wg-release-verification.json
+```
+
+Remote verification requires Supabase CLI and a management access token in
+`SUPABASE_ACCESS_TOKEN`. On macOS it can use the existing Supabase CLI native
+credential. Never paste the token into a command argument or report. The check
+downloads each cloud function into its own temporary directory, compares all
+runtime source files, reads schema metadata through Supabase's read-only SQL API,
+and removes the temporary downloads. It checks function inventory again afterward
+to reject a snapshot collected during another deployment.
+
+The manifest records the commit, dirty-worktree state, every cloud entry point,
+explicit gateway policy, shared runtime dependencies, declarations, import map,
+Deno lockfile, migration hashes and schema requirements. A shared helper change
+therefore invalidates every function that imports it. Remote verification fails
+on missing or extra functions, unexpected modules, old source bytes, changed
+gateway settings, changed schema effects or an uncommitted checkout. It verifies
+source/configuration compatibility, not provider secrets or remote package/CDN
+integrity. Preserve the manifest and verification report with each release.
+
+CI runs the local checks without production credentials. The owner confirms that
+Render automatically deploys `main`. Run the remote gate against the reviewed
+commit before merging, then verify that the live frontend publishes the new
+artifact and passes its smoke checks. A Render dashboard login is not needed to
+trigger that deployment.
+
+Render's exact build command, cache behavior, rollback configuration and automatic
+enforcement of this gate remain infrastructure audit follow-ups. Until automatic
+enforcement is verified, the release operator must require a passing remote report
+before merging to `main`. Any provider release step should use the same command
+above, rather than maintaining a second inventory or schema checker.
+
+## Reconciled database baseline
+
+Production had no `supabase_migrations.schema_migrations` ledger when inspected
+on September 5, 2026. `supabase/release/baseline.json` records the hashes of the
+seven historical migration files and 134 observed schema objects/grants. This
+confirms their resulting effects, not the order or mechanism by which they ran:
+
+- Character `updated_at` is non-null with its update trigger and function.
+- Anonymous and authenticated roles can read public profile/campaign columns,
+  and cannot read `public_user.api`, `public_user.patreon` or `campaign.join_key`.
+- The campaign join-grant table has the expected keys, RLS with no public
+  policies, and membership trigger/function.
+- All 13 content tables have timestamp columns/triggers, 12 child tables bump
+  source timestamps, and both functions exclude generated `search_tsv` columns
+  when checking whether content changed.
+- All 12 content metadata columns are JSONB with GIN indexes.
+
+The read-only query is `supabase/release/schema-state.sql`. Baseline format 2 names
+each fingerprint with a `sha256` field, making its algorithm explicit even when
+the schema identifier names a protected column. These fingerprints describe schema
+definitions and migration files; they contain no account credentials. Definition hashes pin
+the inspected database functions, enabled triggers, columns, indexes, constraints
+and grants. A difference requires investigation and a reviewed compatibility
+update. Do not overwrite the baseline from an unreviewed production snapshot just
+to make a failing gate green.
+
+**Do not run `supabase db push` against this project to replay historical files.**
+Do not run `migration repair` merely to create a ledger. Historical SQL is immutable;
+use new migrations. Every new migration needs an entry and read-only effect check
+in `supabase/release/requirements.json`. If a ledger is introduced in a separately
+reviewed reconciliation, the gate also checks recorded post-baseline versions and
+rejects unknown versions. Absence of a ledger never substitutes for effect checks.
+
+## Rollout order
+
+1. Freeze the reviewed commit and preserve the previous compatible release
+   manifest, function source, frontend artifact and provider configuration.
+   Check CI/E2E and the current remote report. Investigate differences instead of
+   treating them as permission to overwrite production.
+2. Apply additive prerequisites before dependent functions. Apply
+   `20260905000000_edge_work_budget.sql` using the approved database
+   connection, `ON_ERROR_STOP` and a transaction. Its quota table/RPC is compatible
+   with old handlers; new paid-work handlers return 503 if it is missing. The
+   read-only requirement verifies the reviewed RPC body and service-role-only
+   access. Apply `20260921000000_fix_dominion_epithet.sql` in the same phase; it
+   replaces only the duplicated nested identifiers for the Trespasser option. Its
+   read-only requirement verifies both Dominion options and all four nested
+   operation identifiers remain distinct. No historical migration replay is needed.
+   Apply `20260924000000_fix_reclaimant_plea.sql` for the three Reclaimant Plea
+   records. It repairs their boolean heightening switch and third innate spell,
+   preserves saved selection identifiers, and aborts on unexpected content changes
+   or pending curator submissions. Its read-only requirement checks all three
+   records; it does not modify characters or homebrew.
+   Apply `20260925000000_fix_rootball_intelligence.sql` for Rootball Chair's
+   Intelligence modifier. It changes only the published template's +4 to -4,
+   preserves operation identifiers and other attributes, and aborts on an
+   unexpected value or pending curator submission. Its read-only requirement
+   verifies the corrected modifier. Existing saved companion copies are untouched.
+3. Deploy the complete cloud inventory from the reviewed checkout. Use
+   `node scripts/release.mjs function-names` as the name source. Deploy those names
+   explicitly with Supabase CLI and the repository `supabase/config.toml`; do not
+   use an unscoped deploy-all command or a global `--no-verify-jwt` override. A
+   shared-module change must deploy all its dependents, and deploying the full
+   55-function inventory is the simple safe default.
+4. For a future restrictive grant/schema change, first deploy handlers compatible
+   with both schemas, smoke-test them, then apply the restriction. July 18's
+   `public_user` permission failure is the reason this order matters.
+5. Run semantic smoke checks: public content and a public profile; authenticated
+   own-profile and character reads; an authorized test-character save followed
+   by a read; conflict handling; admin authorization and rejected anonymous
+   paid-work requests. Use dedicated test identities/data. HTTP 200 alone is not
+   success: inspect the JSend status and saved value. Expensive service success
+   tests should use a controlled quota and approved test input.
+6. Retire obsolete functions after consumer review, then run `release:verify`
+   again and require a passing report before publishing the frontend. On
+   September 5 the unexpected live routes were `find-campaigns`, `find-characters`,
+   `find-encounters`, `get-sheet-content` and self-host `main`. Seven complete UTC
+   days (August 29–September 4) contained 1,764,530 function-edge events and zero
+   events for all five routes, including OPTIONS. Their source bundles and gateway
+   inventory are backed up under `.agents/legacy/infra-release-2026-09-05/`.
+   This supports retirement but does not establish that dormant clients do not
+   exist. A retained compatibility route must be brought
+   back into reviewed source with current authorization and tests; do not simply
+   allowlist an opaque old bundle.
+7. Merge the verified commit to `main` to trigger Render's auto-deploy. Confirm the
+   live entry point references the new frontend artifact, inspect the rendered
+   app, repeat public/authenticated/save smoke checks, and inspect available logs
+   for permission, auth, worker and paid-work failures. Archive the final manifest
+   and successful report. Provider telemetry and semantic checks remain necessary
+   even when hashes agree.
+
+## Rollback
+
+Stop promotion on any failed gate or smoke check. Restore the previous verified
+frontend artifact and compatible function set using their saved manifest. Restore
+all affected shared-module dependents together; restoring one entry point does not
+restore the helper bundled into its neighbors.
+
+Keep additive quota schema in place when rolling back callers. Never roll back
+to a handler that reopens anonymous paid work; disable the affected costly route
+or retain its authorization patch while resolving an upstream problem. Never
+restore public SELECT access to protected account columns or campaign join keys
+to make an old handler work. Prefer a forward handler fix when a schema restriction
+makes the old release incompatible.
+
+After rollback, run the remote gate against the rollback checkout and repeat
+semantic profile/save checks. If no compatible rollback artifact has been tested,
+record that limitation and agree on the recovery plan before promotion; do not
+claim rollback readiness. Dashboard configuration review and a restore drill
+remain necessary to establish that capability.
+
+## Sanitized content snapshots
+
+The GitHub content-snapshot workflow runs weekly on Tuesday at 09:00 UTC or by
+manual dispatch. Code pushes no longer trigger production exports. Exports are
+serialized, have a 15-minute job deadline, a 60-second statement deadline and a
+5-second lock deadline. An export failure does not deploy or change production.
+
+Account, character, campaign, encounter, moderation, join-grant and quota state
+are excluded from the production data export. Sanitized content supports local
+development; it is not a backup of user data. Production backups, restore drills
+and provider resource monitoring are separate operational responsibilities.
+
+
+## Authorization rollout for the next release
+
+Deploy `update-user`, `gm-add-to-group`, `gm-regenerate-code`, and
+`create-content-update` from the reviewed commit before applying
+`20260905010000_account_moderation_writes.sql`. These handlers support both permission
+sets. Run the account-setting and moderation smoke checks, then apply this new
+restriction transactionally. Never restore broad profile or moderation writes to
+make an old handler work. The added release requirement checks INSERT/UPDATE column
+grants as well as table privileges and policies; the old baseline remains immutable.
+
+No existing profiles are deleted or demoted by this migration. The production preflight found no duplicate user IDs and confirmed the server-owned
+signup trigger. Existing elevated accounts require a separate identity review before cleanup.
+
+## Browser diagnostics and semantic monitoring
+
+The app reports a maximum of one event per failure category per page to
+`report-client-error`. Supabase function logs receive a fixed category, page category,
+build revision and random trace ID. The endpoint rejects extra fields, accepts at
+most 512 bytes and caps logging at 60 reports per minute per isolate. These are
+sampled operational signals, not an exhaustive error census. Provider log retention
+and alert delivery still need to be configured for the desired response window.
+
+The `Production health` workflow runs four read-only probes every 15 minutes:
+frontend HTML, Auth health, a known content source and source timestamps. It rejects
+HTTP-200 failure envelopes and malformed data. It does not submit content, write
+characters or invoke paid services. Configure the public anonymous key in repository
+variable `WG_MONITOR_ANON_KEY`. Repository owners receive failures through their
+GitHub Actions notification settings; verify that the responsible operator has
+workflow failure notifications enabled. GitHub schedules can be delayed and are not
+an availability guarantee. Controlled authenticated save checks remain a release
+step, not a recurring mutation of a real user's character.
+
+The update notice lets each tab choose when to reload. It flushes character drafts
+before activation; finish edits in other forms before choosing **Reload app**.
+An update activated in another tab shows a prompt instead of forcing this tab to
+reload. The error page also offers an explicit reload for missing old assets.
+
+## Quiet character saving
+
+Normal saving, successful retries and compatible remote updates run without a
+status row, toast or recovery controls on the character sheet and builder. Changes
+to that layout require an intentional UI scope decision.
+
+Temporary network failures retry quietly while edits remain retained on the device.
+A toast appears when local retention fails, editing permission is lost, or the server
+explicitly rejects the change. An explicitly rejected payload stays buffered and is
+not repeatedly submitted; a corrected edit can save again. Storage warnings clear
+after local retention or server confirmation succeeds. Conflicting edits that cannot be safely
+merged ask which version to keep. An encounter conflict links to the character to
+resolve it. Authentication and calculation failures retain their existing recovery
+paths. There is no download or discard workflow for save history.
+
+Retained drafts stay on the device under the same character ID. They do not create
+additional server characters. Versioned drafts with a known common ancestor can be
+reconciled automatically. Older drafts without enough information for a safe merge
+remain untouched; their presence alone does not interrupt the user or replace a
+newer server save.
+
+Recovery verification covers reload, account changes and builder/sheet navigation,
+with server reads proving saved values and local checks proving unreplayable drafts
+are preserved. The Cypress `saveRecovery` scenario also checks that the ordinary
+sheet has no added saving controls or notifications at desktop and phone widths.
+Connection, encounter and remote-update scenarios verify real acknowledgements,
+reopening, and error-only notifications rather than relying on a displayed Saved label.
+
+## Recovery evidence and next drill
+
+On September 5, 2026, production had seven completed daily physical backups (August
+30 through September 5), with PITR disabled. The newest backup was at
+04:44:18 UTC. A daily backup implies up to roughly one day of potential database
+changes to recover separately; it does not prove a restore time.
+
+Database backups cover Storage metadata, not uploaded object bytes. Back up both
+`portraits` and `backgrounds` to an independently recoverable, private destination.
+See [Supabase backups](https://supabase.com/docs/guides/platform/backups).
+
+Before declaring recovery ready:
+
+1. Select an isolated restore destination, encrypted object-backup destination,
+   recovery-point target and recovery-time target. Keep encryption-key recovery
+   separate from the backup; never put plaintext user exports into Git or CI artifacts.
+2. Restore a database backup into that isolated destination, with outbound Discord,
+   email, Patreon and paid integrations disabled. Never restore over production as
+   a test. Record backup age, start/finish times and any missing schema/functions.
+3. Verify profiles, Auth, RLS denial tests, controlled character reads/saves, campaign
+   joins and moderation state. Use dedicated test identities rather than messaging
+   real users. Preserve an evidence report without account data or tokens.
+4. Restore object bytes with their matching metadata and compare counts, sizes and
+   checksums. Load sample restored images through the isolated app.
+5. Record measured recovery time, cleanup and gaps. A sanitized development dump
+   or successful backup listing is not evidence that production can be restored.
+
+This release does not enable PITR, purchase a second project or claim an unperformed
+production restore drill. Those steps require the chosen destination and recovery policy.

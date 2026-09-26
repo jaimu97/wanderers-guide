@@ -23,7 +23,7 @@ export default function EntityInfoSection(this: any, props: {
   id: StoreID;
   entity: LivingEntity | null;
   setEntity: SetterOrUpdater<LivingEntity | null>;
-  saveEntity?: (c: Character) => Promise<Character | null>;
+  saveEntity?: (character: Character) => void;
 }) {
   const navigate = useNavigate();
   const theme = useMantineTheme();
@@ -44,7 +44,7 @@ export default function EntityInfoSection(this: any, props: {
   };
 
   // I take 1000 xp and give you 1 level
-  const handleLevelUp = async () => {
+  const handleLevelUp = () => {
     if (!props.entity || !isCharacter(props.entity)) return;
     const currentExp = props.entity.experience || 0;
     if (currentExp < 1000) return;
@@ -56,7 +56,7 @@ export default function EntityInfoSection(this: any, props: {
     };
 
     props.setEntity(newEntity);
-    await props.saveEntity?.(newEntity);
+    props.saveEntity?.(newEntity);
 
     // and then derail the campaign by taking you to the character builder
     navigate(`/builder/${props.entity.id}`);
@@ -206,7 +206,7 @@ export default function EntityInfoSection(this: any, props: {
                 <Box>
                   <BlurButton
                     size='compact-xs'
-                    bgColor={ICON_BG_COLOR}
+                    bgColor={IMPRINT_BG_COLOR}
                     fw={500}
                     fullWidth
                     onClick={handleLevelUp}

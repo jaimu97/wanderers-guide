@@ -7,8 +7,11 @@ import {
   VariableType,
   VariableValue,
   VariableNum,
+  VariableListStr,
   ExtendedVariableValue,
   ProficiencyType,
+  ProficiencyValue,
+  ExtendedProficiencyType,
 } from '@schemas/variables';
 import {
   isAttributeValue,
@@ -32,6 +35,16 @@ import {
 } from './variable-utils';
 import { cloneDeep, isBoolean, isEqual, isNumber, isString, uniq } from 'lodash-es';
 import { throwError } from '@utils/error-handling';
+import {
+  compareSkillAdjustments,
+  getSkillIncreaseCap,
+  previewSkillAdjustment,
+  resolveSkillAdjustments,
+  SkillAdjustment,
+  SkillEffectContext,
+  SkillSelectionPreview,
+} from './skill-progression';
+export { getSkillIncreaseCap } from './skill-progression';
 
 export const HIDDEN_VARIABLES = [
   'SKILL_LORE____',
@@ -220,6 +233,7 @@ export const DEFAULT_VARIABLES: Record<string, Variable> = {
   FEAT_NAMES: newVariable('list-str', 'FEAT_NAMES'),
   SPELL_NAMES: newVariable('list-str', 'SPELL_NAMES'),
   LANGUAGE_NAMES: newVariable('list-str', 'LANGUAGE_NAMES'),
+  TRAIT_NAMES: newVariable('list-str', 'TRAIT_NAMES'),
   CLASS_FEATURE_NAMES: newVariable('list-str', 'CLASS_FEATURE_NAMES'),
   PHYSICAL_FEATURE_NAMES: newVariable('list-str', 'PHYSICAL_FEATURE_NAMES'),
   EXTRA_ITEM_NAMES: newVariable('list-str', 'EXTRA_ITEM_NAMES', ['FIST']),
@@ -390,6 +404,284 @@ function getVariableStore(id: StoreID) {
   return variableMap.get(id)!;
 }
 
+/** Add a bonus with replayable ownership while retaining the existing stacking and display history. */
+export function addVariableBonus(
+  id: StoreID,
+  name: string,
+  value: string | number | undefined,
+  type: string | undefined,
+  text: string,
+  source: string
+): void {
+  mutateVariable(id, () => applyAddVariableBonus(id, name, value, type, text, source));
+}
+
+/** Record variable creation even if another source has already created it. */
+export function addVariable(
+  id: StoreID,
+  type: VariableType,
+  name: string,
+  defaultValue?: VariableValue,
+  source?: string
+): Variable {
+  const value = cloneDeep(defaultValue);
+  const context = getSkillEffectContext(id);
+  return mutateVariable(id, () => applyAddVariable(id, type, name, value, source, context));
+}
+
+/** Delete a variable through the same replayable write path. */
+export function removeVariable(id: StoreID, name: string): void {
+  mutateVariable(id, () => applyRemoveVariable(id, name));
+}
+
+/** Record assignment intent, including assignments that are currently hidden by a higher value. */
+export function setVariable(id: StoreID, name: string, value: VariableValue, source?: string): void {
+  const input = cloneDeep(value);
+  const context = getSkillEffectContext(id);
+  mutateVariable(id, () => applySetVariable(id, name, input, source, context));
+}
+
+/** Record adjustments, including currently redundant rank and list grants. */
+export function adjVariable(
+  id: StoreID,
+  name: string,
+  amount: VariableValue | ExtendedVariableValue,
+  source?: string
+): void {
+  const input = cloneDeep(amount);
+  const context = getSkillEffectContext(id);
+  mutateVariable(id, () => applyAdjVariable(id, name, input, source, context));
+}
+
+/** Record removal as a filter, so replay never restores another removed grant from an old list snapshot. */
+export function filterVariableList(id: StoreID, name: string, keep: (value: string) => boolean, source?: string): void {
+  mutateVariable(id, () => {
+    const values = getVariable<VariableListStr>(id, name)?.value ?? [];
+    applySetVariable(id, name, values.filter(keep), source);
+  });
+}
+
+/** A particular grant occurrence, retained by deferred writes until execution finishes. */
+export type VariableEffectScope = { key: string; content: string; revoked: boolean; revision: number };
+type VariableIntent = { scopes: VariableEffectScope[]; apply: () => unknown };
+type VariableEffects = {
+  baseline: VariableStore;
+  intents: VariableIntent[];
+  scopes: Map<string, VariableEffectScope>;
+  allScopes: Set<VariableEffectScope>;
+  removals: { owners: VariableEffectScope[]; targets: VariableEffectScope[] }[];
+  replayWork: number;
+  active: VariableEffectScope[];
+  applying: boolean;
+  skillContext?: SkillEffectContext;
+  skillContexts: Map<string, SkillEffectContext>;
+  skills: Map<string, { baseline: ProficiencyValue; adjustments: SkillAdjustment[] }>;
+};
+const variableEffects = new WeakMap<VariableStore, VariableEffects>();
+
+/** Start an execution-local intent journal; exported character stores contain only ordinary values and history. */
+export function beginVariableEffects(id: StoreID): void {
+  const store = getVariableStore(id);
+  if (!variableEffects.has(store)) {
+    variableEffects.set(store, {
+      baseline: cloneDeep(store),
+      intents: [],
+      scopes: new Map(),
+      allScopes: new Set(),
+      removals: [],
+      replayWork: 0,
+      active: [],
+      applying: false,
+      skillContexts: new Map(),
+      skills: new Map(),
+    });
+  }
+}
+
+/** Release provenance after success or failure so later UI writes are ordinary variable edits. */
+export function finishVariableEffects(id: StoreID): void {
+  variableEffects.delete(getVariableStore(id));
+}
+
+/** Attach a stable source occurrence and earned level to writes across all operation passes. */
+export async function withSkillEffectContext<T>(
+  id: StoreID,
+  key: string,
+  level: number,
+  run: () => Promise<T>
+): Promise<T> {
+  beginVariableEffects(id);
+  const effects = variableEffects.get(getVariableStore(id))!;
+  let context = effects.skillContexts.get(key);
+  if (!context) {
+    context = { key, level, order: effects.skillContexts.size };
+    effects.skillContexts.set(key, context);
+  }
+  const previous = effects.skillContext;
+  effects.skillContext = context;
+  try {
+    return await run();
+  } finally {
+    effects.skillContext = previous;
+  }
+}
+
+/** Expose execution provenance only while building results; it is never persisted in a character. */
+export function getSkillEffectContext(id: StoreID): SkillEffectContext | undefined {
+  return variableEffects.get(getVariableStore(id))?.skillContext;
+}
+
+/** Build a selector's before/after ranks at its own occurrence, excluding later character choices. */
+export function getSkillSelectionPreview(
+  id: StoreID,
+  name: string,
+  value: ExtendedProficiencyType,
+  context: SkillEffectContext
+): SkillSelectionPreview | undefined {
+  const effects = variableEffects.get(getVariableStore(id));
+  const variable = getVariable<VariableProf>(id, name);
+  if (!effects || variable?.type !== 'prof' || !name.startsWith('SKILL_')) return undefined;
+  const progression = effects.skills.get(name);
+  const choice: SkillAdjustment = { context, value };
+  const prior =
+    progression?.adjustments.filter(
+      (adjustment) => adjustment.context.key !== context.key && compareSkillAdjustments(adjustment, choice) < 0
+    ) ?? [];
+  const baseline = progression?.baseline ?? variable.value;
+  for (const _adjustment of prior) boundVariableReplay(effects);
+  return previewSkillAdjustment(compileProficiencyType(resolveSkillAdjustments(baseline, prior)), value, context.level);
+}
+
+/** Record skill transitions in the existing removal journal's replay, with no second persisted state. */
+function applySkillAdjustment(
+  id: StoreID,
+  variable: VariableProf,
+  value: ExtendedProficiencyType,
+  attribute: string | undefined,
+  context: SkillEffectContext | undefined,
+  assignment = false
+): boolean {
+  const effects = variableEffects.get(getVariableStore(id));
+  if (!effects || !context || !variable.name.startsWith('SKILL_')) return false;
+  let progression = effects.skills.get(variable.name);
+  if (!progression) {
+    progression = { baseline: cloneDeep(variable.value), adjustments: [] };
+    effects.skills.set(variable.name, progression);
+  }
+  progression.adjustments.push({ context, value, attribute, assignment });
+  for (const _adjustment of progression.adjustments) boundVariableReplay(effects);
+  variable.value = resolveSkillAdjustments(progression.baseline, progression.adjustments);
+  return true;
+}
+
+/** Retain every write intention, including grants that currently lose to a higher rank or duplicate value. */
+function mutateVariable<T>(id: StoreID, apply: () => T): T {
+  const effects = variableEffects.get(getVariableStore(id));
+  if (!effects || effects.applying) return apply();
+  if (effects.intents.length >= 200_000)
+    throw new Error('Content operations exceed the variable effect limit (200000).');
+  effects.intents.push({ scopes: [...effects.active], apply });
+  effects.applying = true;
+  try {
+    return apply();
+  } finally {
+    effects.applying = false;
+  }
+}
+
+/** Capture grant ancestry so delayed language replacements and bindings can be revoked with their source. */
+export function getVariableEffectScopes(id: StoreID): VariableEffectScope[] {
+  return [...(variableEffects.get(getVariableStore(id))?.active ?? [])];
+}
+
+/** A child effect belongs to every ancestor grant, so removing its parent also removes the child effect. */
+export function areVariableEffectScopesActive(scopes: VariableEffectScope[]): boolean {
+  return scopes.every((scope) => !scope.revoked);
+}
+
+/** Run writes with their captured ownership while keeping unrelated execution sources independent. */
+export async function withVariableEffectScopes<T>(
+  id: StoreID,
+  scopes: VariableEffectScope[],
+  run: () => Promise<T>
+): Promise<T | undefined> {
+  if (!areVariableEffectScopesActive(scopes)) return undefined;
+  beginVariableEffects(id);
+  const effects = variableEffects.get(getVariableStore(id))!;
+  const previous = effects.active;
+  effects.active = scopes;
+  try {
+    return await run();
+  } finally {
+    effects.active = previous;
+  }
+}
+
+/** Reuse a grant across engine passes; a later explicit grant creates a fresh occurrence after removal. */
+export async function withVariableEffectScope<T>(
+  id: StoreID,
+  key: string,
+  content: string,
+  allowRegrant: boolean,
+  run: () => Promise<T>
+): Promise<T | undefined> {
+  beginVariableEffects(id);
+  const effects = variableEffects.get(getVariableStore(id))!;
+  let scope = effects.scopes.get(key);
+  if (!scope || (scope.revoked && allowRegrant)) {
+    scope = { key, content, revoked: false, revision: effects.allScopes.size };
+    effects.scopes.set(key, scope);
+    effects.allScopes.add(scope);
+  }
+  return withVariableEffectScopes(id, [...effects.active, scope], run);
+}
+
+/** Bound repeated grant/remove rebuilds as well as the operation runner's forward traversal. */
+function boundVariableReplay(effects: VariableEffects): void {
+  if (++effects.replayWork > 1_000_000)
+    throw new Error('Content operations exceed the effect reconstruction work limit.');
+}
+
+/**
+ * Rebuild using remaining write intentions, never inverse arithmetic or display labels.
+ * This preserves independent duplicate grants, typed bonuses, assignments and max/clamp semantics.
+ */
+export function removeVariableEffects(id: StoreID, content: string): void {
+  const store = getVariableStore(id);
+  const effects = variableEffects.get(store);
+  if (!effects) return;
+  const targets = [...effects.allScopes].filter((scope) => scope.content === content);
+  if (targets.length === 0) return;
+  effects.removals.push({ owners: [...effects.active], targets });
+  // Later removals decide whether an earlier source still exists. Removing a source
+  // that revoked something restores those earlier grants instead of retaining its side effect.
+  for (const scope of effects.allScopes) scope.revoked = false;
+  for (let index = effects.removals.length - 1; index >= 0; index--) {
+    const removal = effects.removals[index];
+    if (areVariableEffectScopesActive(removal.owners)) {
+      for (const scope of removal.targets) {
+        boundVariableReplay(effects);
+        scope.revoked = true;
+      }
+    }
+  }
+  const baseline = cloneDeep(effects.baseline);
+  for (const name of Object.keys(store.variables)) delete store.variables[name];
+  Object.assign(store.variables, baseline.variables);
+  store.bonuses = baseline.bonuses;
+  store.history = baseline.history;
+  effects.skills.clear();
+  effects.applying = true;
+  try {
+    for (const intent of effects.intents) {
+      boundVariableReplay(effects);
+      if (areVariableEffectScopesActive(intent.scopes)) intent.apply();
+    }
+  } finally {
+    effects.applying = false;
+  }
+}
+
 /**
  * Gets all variables
  * @returns - all variables
@@ -439,7 +731,7 @@ export function getVariableBonuses(
   });
 }
 
-export function addVariableBonus(
+function applyAddVariableBonus(
   id: StoreID,
   name: string,
   value: string | number | undefined,
@@ -498,18 +790,19 @@ function addVariableHistory(id: StoreID, name: string, to: VariableValue, from: 
  * @param defaultValue - optional, default value of the variable
  * @returns - the variable that was added
  */
-export function addVariable(
+function applyAddVariable(
   id: StoreID,
   type: VariableType,
   name: string,
   defaultValue?: VariableValue,
-  source?: string
+  source?: string,
+  context?: SkillEffectContext
 ) {
   let variable = getVariables(id)[name];
   if (variable) {
     // Already exists
     if (defaultValue && type === 'prof') {
-      adjVariable(id, name, defaultValue, source);
+      applyAdjVariable(id, name, defaultValue, source, context);
     }
   } else {
     // New variable
@@ -526,8 +819,9 @@ export function addVariable(
  * Removes a variable
  * @param name - name of the variable to remove
  */
-export function removeVariable(id: StoreID, name: string) {
+function applyRemoveVariable(id: StoreID, name: string) {
   delete getVariables(id)[name];
+  variableEffects.get(getVariableStore(id))?.skills.delete(name);
 }
 
 /**
@@ -564,7 +858,13 @@ export function exportVariableStore(id: StoreID): VariableStore {
  * @param name - name of the variable to set
  * @param value - VariableValue
  */
-export function setVariable(id: StoreID, name: string, value: VariableValue, source?: string) {
+function applySetVariable(
+  id: StoreID,
+  name: string,
+  value: VariableValue,
+  source?: string,
+  context?: SkillEffectContext
+) {
   let variable = getVariables(id)[name];
   if (!variable) {
     // throwError(`Invalid variable name: ${name}`);
@@ -596,7 +896,9 @@ export function setVariable(id: StoreID, name: string, value: VariableValue, sou
     variable.value.value = value.value;
     variable.value.partial = value.partial;
   } else if (isVariableProf(variable) && isProficiencyValue(value)) {
-    if (isProficiencyType(value.value)) {
+    if (applySkillAdjustment(id, variable, value.value, value.attribute, context, true)) {
+      // The execution journal owns the complete skill assignment.
+    } else if (isProficiencyType(value.value)) {
       variable.value.value = value.value;
     }
     if (value.attribute) {
@@ -608,16 +910,6 @@ export function setVariable(id: StoreID, name: string, value: VariableValue, sou
 
   // Add to history
   addVariableHistory(id, variable.name, variable.value, oldValue, source ?? 'Updated');
-}
-
-/**
- * Adjusts a variable by a given amount
- * @param name - name of the variable to adjust
- * @param amount - new value to adjust by
- */
-/** The highest rank a skill increase itself may target at the given level. */
-export function getSkillIncreaseCap(level: number): ProficiencyType {
-  return level >= 15 ? 'L' : level >= 7 ? 'M' : 'E';
 }
 
 /**
@@ -647,21 +939,10 @@ export function getLevelCappedProficiencyType(id: StoreID, variable: VariablePro
 }
 
 /**
- * Clamps every SKILL_* proficiency's spent increases to what's legal for the entity's
- * level, so rank grants and skill increases compose per RAW instead of stacking past
- * the level gates.
- *
- * Skill increases may only raise a skill to expert (any level), master (7th+), or
- * legendary (15th+). Auto-scaling rank grants (e.g. Acrobat Dedication's master-at-7th)
- * execute in the conditional round, after every numeric increase, so an increase spent
- * before such a grant activates would otherwise re-apply on top of the granted rank and
- * over-compile (trained + 1 increase + master grant = legendary). Clamping increases to
- * the level cap absorbs exactly the redundant ones while:
- *  - increases stacked on grants below the cap keep working (e.g. a swashbuckler
- *    style's training + a later skill increase still compiles to expert),
- *  - rank grants above the cap are untouched (mythic/apostle feats may exceed gates),
- *  - negative increases (penalties) are never modified.
- * Runs after operation execution for each store (see operations.main.ts).
+ * Final fallback for ordinary/imported stores without execution provenance. Operation
+ * journals already resolve each increase at its earned level; this keeps external
+ * values within the current level cap without lowering exceptional rank grants or
+ * changing negative increases. Runs after each store commits in operations.main.ts.
  * @param id - Variable store ID to normalize
  */
 export function normalizeProficiencies(id: StoreID) {
@@ -685,7 +966,13 @@ export function normalizeProficiencies(id: StoreID) {
   }
 }
 
-export function adjVariable(id: StoreID, name: string, amount: VariableValue | ExtendedVariableValue, source?: string) {
+function applyAdjVariable(
+  id: StoreID,
+  name: string,
+  amount: VariableValue | ExtendedVariableValue,
+  source?: string,
+  context?: SkillEffectContext
+) {
   let variable = getVariables(id)[name];
   if (!variable) {
     // throwError(`Invalid variable name: ${name}`);
@@ -696,7 +983,9 @@ export function adjVariable(id: StoreID, name: string, amount: VariableValue | E
   if (isVariableProf(variable)) {
     if (isProficiencyValue(amount) || isExtendedProficiencyValue(amount)) {
       const { value, attribute } = amount;
-      if (isProficiencyType(value)) {
+      if (applySkillAdjustment(id, variable, value, attribute ?? undefined, context)) {
+        // The earned-level timeline already applied this adjustment.
+      } else if (isProficiencyType(value)) {
         variable.value.value = maxProficiencyType(variable.value.value, value);
       } else if (isExtendedProficiencyType(value)) {
         if (!variable.value.increases) {

@@ -1,18 +1,20 @@
+import { CharacterLoadError } from '@common/CharacterLoadError';
 import D20Loader from '@assets/images/D20Loader';
 import { characterState } from '@atoms/characterAtoms';
+import { sessionState } from '@atoms/supabaseAtoms';
 import { drawerState } from '@atoms/navAtoms';
 import { CharacterInfo } from '@common/CharacterInfo';
+import { OperationError } from '@common/OperationError';
 import RichText from '@common/RichText';
 import ResultWrapper from '@common/operations/results/ResultWrapper';
 import { SelectContentButton, selectContent } from '@common/select/SelectContent';
 import { IMPRINT_BG_COLOR, IMPRINT_BG_COLOR_HOVER, IMPRINT_BORDER_COLOR } from '@constants/data';
 import {
   fetchContent,
+  defineDefaultSources,
   fetchContentPackage,
   fetchContentSources,
   getDefaultSources,
-  getDefaultSourcesKey,
-  isContentPackageEmpty,
 } from '@content/content-store';
 import { getIconFromContentType } from '@content/content-utils';
 import classes from '@css/FaqSimple.module.css';
@@ -41,6 +43,7 @@ import { ObjectWithUUID, convertKeyToBasePrefix, hasOperationSelection } from '@
 import { removeParentSelections } from '@operations/selection-tree';
 import { IconId, IconPuzzle } from '@tabler/icons-react';
 import { useQuery } from '@tanstack/react-query';
+import { makeRequest } from '@requests/request-manager';
 import {
   AbilityBlock,
   Ancestry,
@@ -73,18 +76,33 @@ const CHOICE_COUNT_INTERVAL = 1500;
 
 export default function CharBuilderCreation(props: { characterId: number; pageHeight: number }) {
   const theme = useMantineTheme();
+  const actorId = useAtomValue(sessionState)?.user.id ?? null;
   const [doneLoading, setDoneLoading] = useState(false);
+  const [sourceRequest, setSourceRequest] = useState<{ id: number; actor: string | null; sources: number[] }>();
+  const requestedSources =
+    sourceRequest?.id === props.characterId && sourceRequest.actor === actorId ? sourceRequest.sources : undefined;
+  useEffect(() => setDoneLoading(false), [props.characterId, actorId]);
 
-  const { data: content, isFetching, refetch } = useQuery({
+  const {
+    data: content,
+    isFetching,
+    isError,
+    refetch,
+  } = useQuery({
     queryKey: [
       `find-content-${props.characterId}-for-char-builder-creation`,
-      { characterId: props.characterId, sources: getDefaultSourcesKey('PAGE') },
+      { characterId: props.characterId, actor: actorId, sources: requestedSources ?? null },
     ],
     queryFn: async () => {
+      const character = await makeRequest<Character>('find-character', { id: props.characterId }, false, {
+        throwOnFailure: true,
+        ...(actorId ? { expectedActorId: actorId } : {}),
+      });
+      const sources = defineDefaultSources('PAGE', requestedSources ?? character?.content_sources?.enabled ?? []);
       // Prefetch content sources (to avoid multiple requests)
-      await fetchContentSources(getDefaultSources('PAGE'));
+      await fetchContentSources(sources);
 
-      const content = await fetchContentPackage(getDefaultSources('PAGE'), {
+      const content = await fetchContentPackage(sources, {
         fetchSources: true,
         fetchCreatures: false,
       });
@@ -128,28 +146,31 @@ export default function CharBuilderCreation(props: { characterId: number; pageHe
       <Stack align='center' gap='xs' maw={380} px='md'>
         <Text fw={600}>Couldn't load game content</Text>
         <Text size='sm' c='dimmed' ta='center'>
-          The content library didn't load, so the builder stayed closed to avoid saving your character against
-          missing data. Check your connection and try again.
+          The content library didn't load, so the builder stayed closed to avoid saving your character against missing
+          data. Check your connection and try again.
         </Text>
         <Button onClick={() => refetch()}>Retry</Button>
       </Stack>
     </Box>
   );
 
-  if (isFetching || !content) {
-    return loader;
-  } else if (isContentPackageEmpty(content)) {
-    // Resolved-but-empty corpus = failed fetch. Don't mount the builder against no
-    // content (it would degrade the character and the auto-save would persist it, #235).
+  if (isError && !isFetching) {
     return loadError;
+  } else if (isFetching || !content) {
+    return loader;
   } else {
     return (
       <>
         <div style={{ display: doneLoading ? 'none' : undefined }}>{loader}</div>
         <div style={{ display: doneLoading ? undefined : 'none' }}>
           <CharBuilderCreationInner
+            key={props.characterId}
             characterId={props.characterId}
             content={content}
+            onSourcesChange={(sources) => {
+              setDoneLoading(false);
+              setSourceRequest({ id: props.characterId, actor: actorId, sources });
+            }}
             pageHeight={props.pageHeight}
             onFinishLoading={() => {
               interval.stop();
@@ -167,6 +188,7 @@ export function CharBuilderCreationInner(props: {
   content: ContentPackage;
   pageHeight: number;
   onFinishLoading: () => void;
+  onSourcesChange: (sources: number[]) => void;
 }) {
   const isMobile = isCharacterBuilderMobile();
   const isPhone = useMediaQuery(phoneQuery());
@@ -174,14 +196,20 @@ export function CharBuilderCreationInner(props: {
 
   const [levelItemValue, setLevelItemValue] = useState<string | null>(null);
 
-  const { character, setCharacter, results } = useCharacter(props.characterId, {
-    type: 'EXECUTE_OPS',
-    data: {
-      content: props.content,
-      context: 'CHARACTER-BUILDER',
-      onFinishLoading: props.onFinishLoading,
-    },
-  });
+  const { character, setCharacter, results, operationError, isCalculating, retryOperations, loadError, retryLoad } =
+    useCharacter(props.characterId, {
+      type: 'EXECUTE_OPS',
+      data: {
+        content: props.content,
+        context: 'CHARACTER-BUILDER',
+        onFinishLoading: props.onFinishLoading,
+        onSourcesChange: props.onSourcesChange,
+      },
+    });
+
+  if (loadError) return <CharacterLoadError onRetry={retryLoad} />;
+
+  if (operationError) return <OperationError loading={isCalculating} onRetry={retryOperations} />;
 
   const levelItems = Array.from({ length: (character?.level ?? 0) + 1 }, (_, i) => i).map((level) => {
     return (

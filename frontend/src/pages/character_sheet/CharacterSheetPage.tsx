@@ -1,12 +1,11 @@
+import { CharacterLoadError } from '@common/CharacterLoadError';
+import { sessionState } from '@atoms/supabaseAtoms';
+import { useAtomValue } from 'jotai';
 import D20Loader from '@assets/images/D20Loader';
 import { glassStyle } from '@utils/colors';
 import BlurBox from '@common/BlurBox';
-import {
-  defineDefaultSources,
-  fetchContentPackage,
-  fetchContentSources,
-  isContentPackageEmpty,
-} from '@content/content-store';
+import { OperationError } from '@common/OperationError';
+import { defineDefaultSources, fetchContentPackage, fetchContentSources } from '@content/content-store';
 
 import {
   ActionIcon,
@@ -92,16 +91,31 @@ export function Component(props: {}) {
   };
 
   const theme = useMantineTheme();
+  const actorId = useAtomValue(sessionState)?.user.id ?? null;
   const [doneLoading, setDoneLoading] = useState(false);
+  const [sourceRequest, setSourceRequest] = useState<{ id: string; actor: string | null; sources: number[] }>();
+  const requestedSources =
+    sourceRequest?.id === characterId && sourceRequest.actor === actorId ? sourceRequest.sources : undefined;
+  useEffect(() => setDoneLoading(false), [characterId, actorId]);
 
-  const { data: content, isFetching, refetch } = useQuery({
-    queryKey: [`find-content-${characterId}`],
+  const {
+    data: content,
+    isFetching,
+    isError,
+    refetch,
+  } = useQuery({
+    queryKey: [`find-content-${characterId}`, { actor: actorId, sources: requestedSources ?? null }],
     queryFn: async () => {
       // Set default sources
-      const character = await makeRequest<Character>('find-character', {
-        id: characterId,
-      });
-      const sv = defineDefaultSources('PAGE', character?.content_sources?.enabled ?? []);
+      const character = await makeRequest<Character>(
+        'find-character',
+        {
+          id: characterId,
+        },
+        false,
+        { throwOnFailure: true, ...(actorId ? { expectedActorId: actorId } : {}) }
+      );
+      const sv = defineDefaultSources('PAGE', requestedSources ?? character?.content_sources?.enabled ?? []);
 
       // Prefetch content sources (to avoid multiple requests)
       await fetchContentSources(sv);
@@ -157,21 +171,18 @@ export function Component(props: {}) {
       <Stack align='center' gap='xs' maw={380} px='md'>
         <Text fw={600}>Couldn't load game content</Text>
         <Text size='sm' c='dimmed' ta='center'>
-          The content library didn't load, so the sheet stayed closed to avoid saving your character against
-          missing data. Check your connection and try again.
+          The content library didn't load, so the sheet stayed closed to avoid saving your character against missing
+          data. Check your connection and try again.
         </Text>
         <Button onClick={() => refetch()}>Retry</Button>
       </Stack>
     </Box>
   );
 
-  if (isFetching || !content) {
-    return loader;
-  } else if (isContentPackageEmpty(content)) {
-    // A resolved-but-empty corpus means the fetch failed (see isContentPackageEmpty).
-    // Do NOT mount the sheet: EXECUTE_OPS against no content wipes HP/boosts/choices
-    // and the auto-save would then persist that loss (#235). Offer a retry instead.
+  if (isError && !isFetching) {
     return loadError;
+  } else if (isFetching || !content) {
+    return loader;
   } else {
     // Render both elements simultaneously so CharacterSheetInner can run
     // EXECUTE_OPS in the background while the loader is still visible.
@@ -181,7 +192,12 @@ export function Component(props: {}) {
         <div style={{ display: doneLoading ? 'none' : undefined }}>{loader}</div>
         <div style={{ display: doneLoading ? undefined : 'none' }}>
           <CharacterSheetInner
+            key={characterId}
             content={content}
+            onSourcesChange={(sources) => {
+              setDoneLoading(false);
+              setSourceRequest({ id: characterId, actor: actorId, sources });
+            }}
             characterId={parseInt(characterId)}
             onFinishLoading={() => {
               interval.stop();
@@ -199,7 +215,12 @@ export function Component(props: {}) {
  * tabbed panel area. Also owns the floating action buttons anchored to the
  * bottom-left corner (modes and campaign).
  */
-function CharacterSheetInner(props: { content: ContentPackage; characterId: number; onFinishLoading: () => void }) {
+function CharacterSheetInner(props: {
+  content: ContentPackage;
+  characterId: number;
+  onFinishLoading: () => void;
+  onSourcesChange: (sources: number[]) => void;
+}) {
   const isTablet = useMediaQuery(tabletQuery());
   const isPhone = useMediaQuery(phoneQuery());
   const { ref, width, height } = useElementSize();
@@ -211,14 +232,25 @@ function CharacterSheetInner(props: { content: ContentPackage; characterId: numb
 
   // EXECUTE_OPS triggers the character's operation pipeline and calls
   // onFinishLoading when it completes, which dismisses the loading screen.
-  const { character, setCharacter, isLoading, saveCharacter } = useCharacter(props.characterId, {
-    type: 'EXECUTE_OPS',
-    data: {
-      content: props.content,
-      context: 'CHARACTER-SHEET',
-      onFinishLoading: props.onFinishLoading,
-    },
-  });
+  const {
+    character,
+    setCharacter,
+    saveCharacter,
+    isLoading,
+    operationError,
+    isCalculating,
+    retryOperations,
+    loadError,
+    retryLoad,
+  } = useCharacter(props.characterId, {
+      type: 'EXECUTE_OPS',
+      data: {
+        content: props.content,
+        context: 'CHARACTER-SHEET',
+        onFinishLoading: props.onFinishLoading,
+        onSourcesChange: props.onSourcesChange,
+      },
+    });
 
   setPageTitle(character && character.name.trim() ? character.name : 'Sheet');
 
@@ -234,6 +266,10 @@ function CharacterSheetInner(props: { content: ContentPackage; characterId: numb
     return props.content.abilityBlocks.filter((block) => block.type === 'mode' && givenModeIds.includes(block.id + ''));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [character, isLoading, props.content]);
+
+  if (loadError) return <CharacterLoadError onRetry={retryLoad} />;
+
+  if (operationError) return <OperationError loading={isCalculating} onRetry={retryOperations} />;
 
   return (
     <Center>
@@ -454,6 +490,7 @@ function SectionPanels(props: {
 
             {activeTab === 'spells' && (
               <SpellsPanel
+                content={props.content}
                 panelHeight={props.panelHeight}
                 panelWidth={props.panelWidth}
                 id={'CHARACTER'}
@@ -858,6 +895,7 @@ function SectionPanels(props: {
               <AnimatePresence mode='wait'>
                 <motion.div key='spells' {...panelMotion}>
                   <SpellsPanel
+                    content={props.content}
                     panelHeight={props.panelHeight}
                     panelWidth={props.panelWidth}
                     id={'CHARACTER'}

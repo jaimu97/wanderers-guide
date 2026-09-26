@@ -54,10 +54,11 @@ import { OperationSelectOptionCustom } from '@schemas/operations';
 import { ExtendedProficiencyType, ProficiencyType, VariableListStr, VariableProf } from '@schemas/variables';
 import { isPhoneSized } from '@utils/mobile-responsive';
 import { pluralize, toLabel } from '@utils/strings';
-import { hasTraitType } from '@utils/traits';
+import { hasArchetypeClassFeatTraits, hasTraitType } from '@utils/traits';
 import { getStatBlockDisplay, getStatDisplay } from '@variables/initial-stats-display';
 import { meetsPrerequisites } from '@variables/prereq-detection';
 import { getFinalProfValue } from '@variables/variable-helpers';
+import { previewSkillAdjustment, SkillSelectionPreviewSchema } from '@variables/skill-progression';
 import {
   getAllAncestryTraitVariables,
   getAllArchetypeTraitVariables,
@@ -92,7 +93,7 @@ import {
   VersatileHeritage,
 } from '@schemas/content';
 import { adjustCreature } from '@utils/creature';
-import { intersection, isEqual, isNumber } from 'lodash-es';
+import { intersection, isNumber } from 'lodash-es';
 import { getEntityLevel } from '@utils/entity-utils';
 import { AdvancedSearchModal, FiltersParams } from '@modals/AdvancedSearchModal';
 import {
@@ -121,17 +122,24 @@ export function SelectContentButton<T extends Record<string, any> = Record<strin
 }) {
   const [_drawer, openDrawer] = useAtom(drawerState);
   const [selected, setSelected] = useState<T | undefined>();
-  const [debouncedSelected] = useDebouncedValue(selected, 3000);
+  const pendingSelection = useRef<{ previousId: unknown; nextId: unknown } | null>(null);
 
-  // Sync the selected content (only after huge delay)
+  // Keep an optimistic choice until its parent accepts it or sends a different value.
   useEffect(() => {
     (async () => {
+      const pending = pendingSelection.current;
+      if (pending) {
+        if (props.selectedId === pending.nextId) {
+          pendingSelection.current = null;
+        } else if (props.selectedId === pending.previousId) {
+          return;
+        } else {
+          pendingSelection.current = null;
+        }
+      }
+
       // If they're the same, no need to do anything
       if (props.selectedId === selected?.id) {
-        return;
-      }
-      // If it's been a short time since the selected changed, don't do anything
-      if (!isEqual(debouncedSelected, selected)) {
         return;
       }
 
@@ -159,7 +167,7 @@ export function SelectContentButton<T extends Record<string, any> = Record<strin
         }
       }
     })();
-  }, [debouncedSelected, props.selectedId, props.type, props.options?.overrideOptions]);
+  }, [selected?.id, props.selectedId, props.type, props.options?.overrideOptions]);
 
   const typeName = toLabel(props.options?.abilityBlockType || props.type);
 
@@ -169,6 +177,7 @@ export function SelectContentButton<T extends Record<string, any> = Record<strin
     selectContent<T>(
       props.type,
       (option) => {
+        pendingSelection.current = { previousId: props.selectedId, nextId: option.id };
         setSelected(option);
         props.onClick(option);
       },
@@ -249,20 +258,23 @@ export function SelectContentButton<T extends Record<string, any> = Record<strin
               <IconTransform size='0.9rem' />
             </Button>
           )}
-          <Button
-            variant='light'
-            size='compact-sm'
-            radius='xl'
-            onClick={() => {
-              setSelected(undefined);
-              props.onClear && props.onClear();
-            }}
-            style={{
-              borderLeft: '1px solid',
-            }}
-          >
-            <IconX size='1rem' />
-          </Button>
+          {props.onClear && (
+            <Button
+              variant='light'
+              size='compact-sm'
+              radius='xl'
+              onClick={() => {
+                pendingSelection.current = { previousId: props.selectedId, nextId: undefined };
+                setSelected(undefined);
+                props.onClear?.();
+              }}
+              style={{
+                borderLeft: '1px solid',
+              }}
+            >
+              <IconX size='1rem' />
+            </Button>
+          )}
         </>
       )}
     </Button.Group>
@@ -578,10 +590,10 @@ export default function SelectContentModal({
                         : undefined
                     }
                     filterFn={(option) =>
-                      intersection(
-                        getAllArchetypeTraitVariables('CHARACTER').map((v) => v.value) ?? [],
-                        option.traits ?? []
-                      ).length > 0 && option.level <= classFeatSourceLevel
+                      hasArchetypeClassFeatTraits(
+                        option.traits,
+                        getAllArchetypeTraitVariables('CHARACTER').map((v) => v.value)
+                      ) && option.level <= classFeatSourceLevel
                     }
                     includeOptions={innerProps.options?.includeOptions}
                     showButton={innerProps.options?.showButton}
@@ -803,17 +815,15 @@ function SelectionOptions(props: {
     options = options.filter((option) => !languageIds.includes(option.id));
   }
 
-  // Filter options based on search query
-  const search = useRef(new JsSearch.Search('id'));
-  useEffect(() => {
-    if (!options) return;
-    search.current.addIndex('name');
-    //search.current.addIndex('description');
-    search.current.addDocuments(options);
-  }, [options]);
-  let filteredOptions = props.searchQuery
-    ? (search.current.search(props.searchQuery) as Record<string, any>[])
-    : options;
+  // Build from this render's eligible options. An effect leaves an already typed
+  // query empty when content arrives, and an accumulating index retains removed choices.
+  const filteredOptions = useMemo(() => {
+    if (!props.searchQuery) return [...options];
+    const search = new JsSearch.Search('id');
+    search.addIndex('name');
+    search.addDocuments(options);
+    return search.search(props.searchQuery) as Record<string, any>[];
+  }, [options, props.searchQuery]);
 
   // Pre-compute the prereq-met rank per option once (rather than re-running
   // `meetsPrerequisites` on every comparator call). Lower rank = better fit:
@@ -832,7 +842,7 @@ function SelectionOptions(props: {
   }
 
   // Sort by level/rank, then prereqs-met (when enabled for feats), then name
-  filteredOptions = filteredOptions.sort((a, b) => {
+  filteredOptions.sort((a, b) => {
     if (a.level !== undefined && b.level !== undefined) {
       if (a.level !== b.level) {
         // Sort greatest first if it's overrideOptions
@@ -1382,6 +1392,7 @@ interface GenericAbilityBlock extends AbilityBlock {
   _custom_select?: GenericData;
   _is_core?: boolean;
   _source_level?: number;
+  _skill_preview?: unknown;
 }
 export function GenericSelectionOption(props: {
   option: GenericAbilityBlock;
@@ -1493,14 +1504,16 @@ export function GenericSelectionOption(props: {
           : props.skillAdjustment;
   }
 
-  let limitedByLevel = false;
-  if (props.skillAdjustment === '1') {
-    if (nextProf && nextProf === 'M' && (props.option._source_level ?? 1) < 7) {
-      limitedByLevel = true;
-    } else if (nextProf && nextProf === 'L' && (props.option._source_level ?? 1) < 15) {
-      limitedByLevel = true;
-    }
+  // The engine knows the rank at this occurrence; later feats must not rewrite an earlier choice's preview.
+  const calculatedPreview = SkillSelectionPreviewSchema.safeParse(props.option._skill_preview);
+  if (calculatedPreview.success) {
+    currentProf = calculatedPreview.data.from;
+    nextProf = calculatedPreview.data.to;
   }
+  const limitedByLevel = calculatedPreview.success
+    ? calculatedPreview.data.limitedByLevel
+    : props.skillAdjustment === '1' &&
+      previewSkillAdjustment(currentProf ?? 'U', '1', props.option._source_level ?? 1).limitedByLevel;
 
   let alreadyProficient =
     !props.selected &&
@@ -1510,6 +1523,9 @@ export function GenericSelectionOption(props: {
         maxProficiencyType(currentProf ?? 'U', props.skillAdjustment) === currentProf));
 
   if (nextProf === null) {
+    alreadyProficient = true;
+  }
+  if (calculatedPreview.success && !props.selected && calculatedPreview.data.from === calculatedPreview.data.to) {
     alreadyProficient = true;
   }
 

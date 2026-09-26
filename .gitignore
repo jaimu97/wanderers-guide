@@ -4,3 +4,12 @@ frontend/package-lock.json
 .env.local
 .env.docker
 .env.*.local
+node_modules/
+
+# Wayfinder maps / local planning docs
+.scratch/
+
+# Agent workspace state (skills and launch command catalog are tracked)
+.agents/worktrees/
+.agents/legacy/
+.agents/**/__pycache__/

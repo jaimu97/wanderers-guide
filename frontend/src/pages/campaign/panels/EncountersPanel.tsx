@@ -7,7 +7,12 @@ import { DisplayIcon } from '@common/IconDisplay';
 import { selectContent } from '@common/select/SelectContent';
 import { applyConditions } from '@conditions/condition-handler';
 import { GUIDE_BLUE, IMPRINT_BG_COLOR, IMPRINT_BORDER_COLOR } from '@constants/data';
-import { defineDefaultSources, fetchContentPackage, getDefaultSources, getDefaultSourcesKey } from '@content/content-store';
+import {
+  defineDefaultSources,
+  fetchContentPackage,
+  getDefaultSources,
+  getDefaultSourcesKey,
+} from '@content/content-store';
 import { getBestArmor } from '@items/inv-utils';
 import {
   Tabs,
@@ -30,7 +35,7 @@ import { getHotkeyHandler, useHover, useMediaQuery } from '@mantine/hooks';
 import { openContextModal } from '@mantine/modals';
 import { CreateCombatantModal } from '@modals/CreateCombatantModal';
 import { executeOperations } from '@operations/operations.main';
-import { confirmHealth } from '@pages/character_sheet/entity-handler';
+import { changeEntityConditions, confirmHealth } from '@pages/character_sheet/entity-handler';
 import { ConditionPills, selectCondition } from '@pages/character_sheet/sections/ConditionSection';
 import { makeRequest } from '@requests/request-manager';
 import {
@@ -51,7 +56,7 @@ import { getEntityLevel } from '@utils/entity-utils';
 import { isPhoneSized, phoneQuery } from '@utils/mobile-responsive';
 import { sign } from '@utils/numbers';
 import { rollDie } from '@utils/random';
-import { isCharacter, isCreature, setterOrUpdaterToValue } from '@utils/type-fixing';
+import { isCharacter, isCreature, setterOrUpdaterToValue, type SetterOrUpdater } from '@utils/type-fixing';
 import useRefresh from '@utils/use-refresh';
 import { getFinalAcValue, getFinalHealthValue, getFinalProfValue } from '@variables/variable-helpers';
 import { cloneDeep, debounce, isEqual, mean, truncate } from 'lodash-es';
@@ -61,10 +66,12 @@ import { GiDiceTwentyFacesTwenty } from '@common/game-icons-inline';
 import { useAtom, useAtomValue } from 'jotai';
 import BlurBox from '@common/BlurBox';
 import ImprintButton from '@common/ImprintButton';
+import { createEncounterCharacterWriter } from '@utils/encounter-character-writer';
 
 export default function EncountersPanel(props: {
   panelHeight: number;
   panelWidth: number;
+  characterWriter?: ReturnType<typeof createEncounterCharacterWriter>;
   campaign?: {
     data: Campaign;
     players: Character[];
@@ -85,11 +92,7 @@ export default function EncountersPanel(props: {
         user_id: session?.user.id,
       });
 
-      // Prefetch content package for creature calculations
-
-      const sv = defineDefaultSources('PAGE', 'ALL-USER-ACCESSIBLE');
-      // We could await fetch content for a more seemless experience but it takes a bit too long imo - Quzzar
-      fetchContentPackage(sv, { fetchSources: false, fetchCreatures: false });
+      defineDefaultSources('PAGE', 'ALL-USER-ACCESSIBLE');
 
       return result ?? [];
     },
@@ -190,6 +193,7 @@ export default function EncountersPanel(props: {
     return (
       <ScrollArea h={props.panelHeight} scrollbars='y'>
         <EncounterView
+          characterWriter={props.characterWriter}
           encounter={encounter}
           setEncounter={(e) => {
             const newEncounters = cloneDeep(encounters);
@@ -458,12 +462,15 @@ export default function EncountersPanel(props: {
 export type PopulatedCombatant = Omit<Combatant, 'data'> & Required<Pick<Combatant, 'data'>>;
 
 function EncounterView(props: {
+  characterWriter?: ReturnType<typeof createEncounterCharacterWriter>;
   encounter: Encounter;
   setEncounter: (encounter: Encounter) => void;
   players?: Character[];
   panelHeight: number;
 }) {
   const [openedAddCombatant, setOpenedAddCombatant] = useState(false);
+  const latestPropsRef = useRef(props);
+  latestPropsRef.current = props;
 
   /**
    * Update the encounter with a new combatant
@@ -524,6 +531,40 @@ function EncounterView(props: {
     return newEncounter;
   };
 
+  /** Modal callbacks keep only identity; apply each action once to the latest visible entity. */
+  const updateCombatantEntity = (
+    id: string,
+    input: Parameters<SetterOrUpdater<LivingEntity>>[0],
+    source: LivingEntity
+  ): void => {
+    const currentProps = latestPropsRef.current;
+    const combatant = currentProps.encounter.combatants.list.find((entry) => entry._id === id);
+    if (!combatant) return;
+    if (combatant.type === 'CHARACTER') {
+      const player = currentProps.players?.find((entry) => entry.id === combatant.character);
+      if (!player) return;
+      // Full snapshots retain the source they were edited from. Functional modal
+      // actions instead resolve against fresh polling and queued GM changes.
+      const current =
+        typeof input === 'function'
+          ? (currentProps.characterWriter?.display(player) ?? player)
+          : isCharacter(source)
+            ? source
+            : player;
+      const entity = cloneDeep(typeof input === 'function' ? input(current) : input);
+      if (isCharacter(entity)) currentProps.characterWriter?.update(current, entity);
+    } else if (combatant.creature) {
+      const entity = cloneDeep(typeof input === 'function' ? input(combatant.creature) : input);
+      if (!isCreature(entity)) return;
+      const encounter = cloneDeep(currentProps.encounter);
+      encounter.combatants.list = encounter.combatants.list.map((entry) =>
+        entry._id === id ? { ...entry, creature: entity } : entry
+      );
+      latestPropsRef.current = { ...currentProps, encounter };
+      currentProps.setEncounter(encounter);
+    }
+  };
+
   /**
    * Display the difficulty badge if there are both allies and enemies
    * @param combatants - The list of combatants
@@ -543,7 +584,8 @@ function EncounterView(props: {
   const populateCombatants = (combatants: Combatant[]): PopulatedCombatant[] => {
     const getCombatantData = (combatant: Combatant): LivingEntity | undefined => {
       if (combatant.type === 'CHARACTER') {
-        return props.players?.find((p) => p.id === combatant.character);
+        const player = props.players?.find((p) => p.id === combatant.character);
+        return player ? (props.characterWriter?.display(player) ?? player) : undefined;
       } else {
         return combatant.creature;
       }
@@ -782,57 +824,7 @@ function EncounterView(props: {
                   combatant={combatant}
                   computed={getComputedData(combatant)}
                   // Returning updated populated entity data, will trigger update of the combatant
-                  updateEntity={(input) => {
-                    let entity = cloneDeep(input);
-
-                    // If health changes, confirm and update entity with new changes
-                    if (entity.hp_current !== combatant.data.hp_current) {
-                      const computed = getComputedData(combatant);
-                      if (computed) {
-                        const result = confirmHealth(`${entity.hp_current}`, computed.maxHp, combatant.data);
-
-                        if (result) {
-                          entity.hp_current = result.entity.hp_current;
-                          entity.details = {
-                            ...entity.details,
-                            conditions: result.entity.details?.conditions ?? [],
-                          };
-                          entity.meta_data = {
-                            ...entity.meta_data,
-                            reset_hp: false,
-                          };
-                        }
-                      }
-                    }
-
-                    if (combatant.type === 'CHARACTER') {
-                      // Send remote update to change character.
-                      //
-                      // Only send the combat fields the encounter panel actually edits.
-                      // combatant.data is a clone of an up-to-400ms-stale poll snapshot of
-                      // the FULL player character, so spreading it would full-replace the
-                      // player's live inventory/spells/etc. with the GM's stale copy and
-                      // silently destroy anything the player changed since the last poll.
-                      const c = entity as Character;
-                      makeRequest('update-character', {
-                        id: combatant.character!,
-                        hp_current: c.hp_current,
-                        hp_temp: c.hp_temp,
-                        stamina_current: c.stamina_current,
-                        resolve_current: c.resolve_current,
-                        hero_points: c.hero_points,
-                        details: c.details,
-                        meta_data: c.meta_data,
-                      });
-                    } else if (combatant.type === 'CREATURE') {
-                      updateCombatant({
-                        ...combatant,
-                        creature: {
-                          ...(entity as Creature),
-                        },
-                      });
-                    }
-                  }}
+                  updateEntity={(input) => updateCombatantEntity(combatant._id, input, combatant.data)}
                   // Update the initiative
                   updateInitiative={(init) => {
                     updateCombatant({
@@ -891,7 +883,7 @@ function CombatantCard(props: {
     maxHp: number;
   };
   updateInitiative: (init: number) => void;
-  updateEntity: (entity: LivingEntity) => void;
+  updateEntity: SetterOrUpdater<LivingEntity>;
   onRemove: () => void;
 }) {
   const isPhone = useMediaQuery(phoneQuery());
@@ -922,34 +914,27 @@ function CombatantCard(props: {
 
   const [health, setHealth] = useState<string | undefined>();
   const healthRef = useRef<HTMLInputElement>(null);
+  const healthEditingRef = useRef(false);
+  const submittedHealthRef = useRef<string | null>(null);
+  const currentHp = props.combatant.data.hp_current;
+  const maximumHp = props.computed?.maxHp;
 
   useEffect(() => {
-    if (props.combatant.data) {
-      const currentHealth =
-        props.combatant.data.hp_current === undefined ? (props.computed?.maxHp ?? 0) : props.combatant.data.hp_current;
-      setHealth(`${currentHealth}` === 'null' ? `${props.computed?.maxHp ?? ''}` : `${currentHealth}`);
+    if (!healthEditingRef.current) {
+      const currentHealth = currentHp === undefined ? (maximumHp ?? 0) : currentHp;
+      setHealth(`${currentHealth}` === 'null' ? `${maximumHp ?? ''}` : `${currentHealth}`);
     }
-  }, [props.combatant, props.computed]);
+  }, [currentHp, maximumHp]);
 
   const handleHealthSubmit = () => {
     const inputHealth = health ?? '0';
-    let result = -1;
-    try {
-      result = evaluate(inputHealth);
-    } catch (e) {
-      result = parseInt(inputHealth);
-    }
-    if (isNaN(result)) result = 0;
-    result = Math.floor(result);
-    if (result < 0) result = 0;
-    if (props.computed && result > props.computed.maxHp) result = props.computed.maxHp;
-
-    props.updateEntity({
-      ...props.combatant.data,
-      hp_current: result,
-    });
-
-    setHealth(`${result}` === 'null' ? `${props.computed?.maxHp ?? ''}` : `${result}`);
+    healthEditingRef.current = false;
+    // Enter causes blur too. Commit that user action once, including under latency.
+    if (submittedHealthRef.current === inputHealth) return;
+    submittedHealthRef.current = inputHealth;
+    const result = confirmHealth(inputHealth, props.computed?.maxHp ?? Number.POSITIVE_INFINITY, props.combatant.data);
+    if (result) props.updateEntity(result.entity);
+    setHealth(`${result?.value ?? props.combatant.data.hp_current}`);
     healthRef.current?.blur();
   };
 
@@ -971,13 +956,6 @@ function CombatantCard(props: {
         value={initiative ?? undefined}
         onChange={(val) => {
           setInitiative(parseInt(`${val}`));
-        }}
-        onFocus={(e) => {
-          const length = e.target.value.length;
-          // Move cursor to end
-          requestAnimationFrame(() => {
-            e.target.setSelectionRange(length, length);
-          });
         }}
         onBlur={handleInitiativeSubmit}
         onKeyDown={getHotkeyHandler([
@@ -1092,14 +1070,9 @@ function CombatantCard(props: {
           autoComplete='nope'
           value={health}
           onChange={(e) => {
+            healthEditingRef.current = true;
+            submittedHealthRef.current = null;
             setHealth(e.target.value);
-          }}
-          onFocus={(e) => {
-            const length = e.target.value.length;
-            // Move cursor to end
-            requestAnimationFrame(() => {
-              e.target.setSelectionRange(length, length);
-            });
           }}
           onBlur={handleHealthSubmit}
           onKeyDown={getHotkeyHandler([
@@ -1113,6 +1086,7 @@ function CombatantCard(props: {
             </Group>
           }
           rightSectionWidth={60}
+          rightSectionPointerEvents='none'
           styles={{
             input: {
               backgroundColor: IMPRINT_BG_COLOR,
@@ -1134,15 +1108,7 @@ function CombatantCard(props: {
             id={getCombatantStoreID(props.combatant)}
             entity={props.combatant.data}
             setEntity={(call) => {
-              const result = setterOrUpdaterToValue(call, props.combatant.data);
-
-              props.updateEntity({
-                ...props.combatant.data,
-                details: {
-                  ...props.combatant.data.details,
-                  conditions: result?.details?.conditions ?? [],
-                },
-              });
+              props.updateEntity((current) => setterOrUpdaterToValue(call, current) ?? current);
             }}
             groupProps={{
               w: 170,
@@ -1156,14 +1122,14 @@ function CombatantCard(props: {
             color='dark.3'
             onClick={() => {
               selectCondition(props.combatant?.data.details?.conditions ?? [], (condition) => {
-                if (!props.combatant) return;
-                props.updateEntity({
-                  ...props.combatant.data,
-                  details: {
-                    ...props.combatant.data.details,
-                    conditions: [...(props.combatant.data.details?.conditions ?? []), condition],
-                  },
-                });
+                props.updateEntity((current) =>
+                  current.details?.conditions?.some((entry) => entry.name === condition.name)
+                    ? current
+                    : changeEntityConditions(getCombatantStoreID(props.combatant), current, [
+                        ...(current.details?.conditions ?? []),
+                        condition,
+                      ])
+                );
               });
             }}
             style={{
@@ -1199,7 +1165,11 @@ function CombatantCard(props: {
 }
 
 async function computeCombatants(combatants: PopulatedCombatant[]) {
-  const content = await fetchContentPackage(getDefaultSources('PAGE'), { fetchSources: false, fetchCreatures: false });
+  // Player rows already contain their calculated stats. Only creatures need the
+  // content package; share that lazy request when several creatures are present.
+  let contentPromise: ReturnType<typeof fetchContentPackage> | undefined;
+  const getCreatureContent = () =>
+    (contentPromise ??= fetchContentPackage(getDefaultSources('PAGE'), { fetchSources: false, fetchCreatures: false }));
 
   async function computeCombatant(combatant: PopulatedCombatant): Promise<{
     _id: string;
@@ -1233,7 +1203,7 @@ async function computeCombatants(combatants: PopulatedCombatant[]) {
         data: {
           id: STORE_ID,
           creature,
-          content,
+          content: await getCreatureContent(),
         },
       });
       // Apply conditions after everything else

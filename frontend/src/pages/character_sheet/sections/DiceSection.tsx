@@ -21,7 +21,7 @@ import { characterState } from '@atoms/characterAtoms';
 import { useDebouncedValue, useDidUpdate } from '@mantine/hooks';
 import { cloneDeep, groupBy } from 'lodash-es';
 import { rollDie } from '@utils/random';
-import { Dice } from '@typing/content';
+import { Dice } from '@schemas/content';
 import { IconArrowBigRightFilled, IconTrash, IconX } from '@tabler/icons-react';
 import { sign } from '@utils/numbers';
 import { useState, useRef, useEffect } from 'react';

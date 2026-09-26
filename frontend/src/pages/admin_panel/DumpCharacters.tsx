@@ -2,7 +2,7 @@ import BlurBox from '@common/BlurBox';
 import { Center, Group, Title, Button, Text, Stack } from '@mantine/core';
 import { showNotification, hideNotification } from '@mantine/notifications';
 import { makeRequest } from '@requests/request-manager';
-import { Character } from '@typing/content';
+import { Character } from '@schemas/content';
 import exportToJSON from '@export/export-to-json';
 import { useState } from 'react';
 

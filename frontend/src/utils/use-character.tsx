@@ -1,29 +1,46 @@
+import { reportClientFailure } from './client-errors';
 import { characterState } from '@atoms/characterAtoms';
+import { sessionState } from '@atoms/supabaseAtoms';
+import { Button, Group, Text } from '@mantine/core';
+import {
+  SAVED_CHARACTER_FIELDS,
+  characterSaveValuesEqual,
+  acknowledgeBufferedCharacterSave,
+  bufferCharacterSave,
+  getBufferedCharacterSave,
+  loadBufferedCharacterSaves,
+  reconcileBufferedCharacterSave,
+  acknowledgeBufferedCharacterRecovery,
+  journalCharacterSaveSubmission,
+  type BufferedCharacterSaveRecord,
+} from './character-save-buffer';
+import { mergeCharacterSave } from './character-merge';
 import { getCachedPublicUser } from '@auth/user-manager';
 import { applyConditions } from '@conditions/condition-handler';
-import { defineDefaultSources, isContentPackageEmpty } from '@content/content-store';
+import { defineDefaultSources } from '@content/content-store';
+import { COMMON_CORE_ID } from '@constants/data';
+import { compareCharacterVersions } from './character-version';
 import { saveCustomization } from '@content/customization-cache';
 import { applyEquipmentPenalties } from '@items/inv-utils';
-import { useDebouncedCallback, useDebouncedValue, useDidUpdate, usePrevious } from '@mantine/hooks';
-import { showNotification } from '@mantine/notifications';
-import { executeOperations } from '@operations/operations.main';
+import { useDebouncedValue, useDidUpdate } from '@mantine/hooks';
+import { hideNotification, showNotification } from '@mantine/notifications';
+import { executeOperations, isOperationCancelled } from '@operations/operations.main';
 import { confirmHealth } from '@pages/character_sheet/entity-handler';
 import { hasSessionExpiredNotice, makeRequest } from '@requests/request-manager';
-import { useQuery, useMutation } from '@tanstack/react-query';
-import { Character, ContentPackage, OperationCharacterResultPackage } from '@schemas/content';
+import { RequestRejectedError } from '@requests/request-rejection';
+import { useMutation, useQuery } from '@tanstack/react-query';
+import { Character, CharacterSchema, ContentPackage, OperationCharacterResultPackage } from '@schemas/content';
 import { saveCalculatedStats } from '@variables/calculated-stats';
 import { setVariable } from '@variables/variable-manager';
 import { isEqual, isArray, cloneDeep } from 'lodash-es';
-import { useEffect, useRef, useState } from 'react';
-import { useAtom } from 'jotai';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useAtom, useAtomValue } from 'jotai';
 import { SetterOrUpdater } from '@utils/type-fixing';
 import { convertToSetEntity } from './type-fixing';
-import { IconRefresh, IconAlertCircle } from '@tabler/icons-react';
 import { hashData } from './numbers';
 import { getDeepDiff } from './objects';
 import { addExtraItems, checkBulkLimit } from '@items/inv-handlers';
 import { getFinalHealthValue, getHealthValueParts } from '@variables/variable-helpers';
-import { supabase } from '../main';
 
 interface CharStateOptionsGeneric {
   type: string;
@@ -36,6 +53,7 @@ interface CharStateOptionsExecuteOps extends CharStateOptionsGeneric {
     content: ContentPackage;
     context: 'CHARACTER-SHEET' | 'CHARACTER-BUILDER';
     onFinishLoading: () => void;
+    onSourcesChange: (sources: number[]) => void;
   };
 }
 
@@ -46,55 +64,14 @@ interface CharStateOptionsSimple extends CharStateOptionsGeneric {
 
 type CharStateOptions = CharStateOptionsExecuteOps | CharStateOptionsSimple;
 
-// Fields that update-character persists. Used to merge on an optimistic-concurrency conflict.
-const SAVED_CHARACTER_FIELDS = [
-  'name',
-  'level',
-  'experience',
-  'hp_current',
-  'hp_temp',
-  'hero_points',
-  'stamina_current',
-  'resolve_current',
-  'inventory',
-  'notes',
-  'details',
-  'roll_history',
-  'custom_operations',
-  'meta_data',
-  'options',
-  'variants',
-  'content_sources',
-  'operation_data',
-  'spells',
-  'companions',
-  'campaign_id',
-] as const;
+type QueuedCharacterSave = { character: Character; actorId: string; scope: number };
 
-/**
- * Three-way merge for a save conflict: start from the authoritative remote row, then
- * re-apply only the top-level fields the user actually changed since `base` (their last
- * synced state). This preserves a concurrent writer's changes to OTHER fields instead of
- * clobbering them, while never silently dropping the user's own edits.
- *
- * Granularity is per top-level field: if two writers edited the SAME field (e.g. both
- * touched `details`) the local edit wins for that whole field. That's still strictly
- * better than the previous unconditional last-write-wins, and the user is notified.
- */
-function mergeCharacterOnConflict(
-  base: Character | null,
-  local: Character | null,
-  remote: Character
-): Character {
-  const merged = cloneDeep(remote);
-  if (!base || !local) return merged;
-  for (const field of SAVED_CHARACTER_FIELDS) {
-    if (!isEqual((local as any)[field], (base as any)[field])) {
-      (merged as any)[field] = cloneDeep((local as any)[field]);
-    }
-  }
-  return merged;
-}
+// Validate the concurrency envelope while retaining the complete authoritative row.
+const remoteCharacterVersionSchema = CharacterSchema.pick({ id: true, updated_at: true });
+const REMOTE_CHARACTER_INTERVAL = 5000;
+
+/** Internal save state, independent of the sheet layout. */
+type CharacterSaveState = 'saved' | 'pending' | 'saving' | 'failed' | 'offline' | 'conflict' | 'read-only';
 
 /**
  * Custom hook to manage character state, including fetching from the database, executing operations, and auto-saving.
@@ -112,9 +89,46 @@ export default function useCharacter(
   saveCharacter?: (c: Character) => Promise<Character | null>;
   isLoading: boolean;
   results: OperationCharacterResultPackage | null;
+  operationError: string | null;
+  isCalculating: boolean;
+  retryOperations: () => void;
+  saveState: CharacterSaveState;
+  draftStored: boolean;
+  retrySave: () => void;
+  loadError: boolean;
+  retryLoad: () => void;
 } {
   const [character, setCharacter] = useAtom(characterState);
-  useAutoSave(character, characterId);
+  const session = useAtomValue(sessionState);
+  const sessionActorId = session?.user.id ?? null;
+  const [loadedIdentity, setLoadedIdentity] = useState<{ id: number; actor: string | null } | null>(null);
+  const hasLoadedCharacter = loadedIdentity?.id === characterId && loadedIdentity.actor === sessionActorId;
+  const loadedActorRef = useRef<string | null>(null);
+  const saveScopeRef = useRef(0);
+  const needsCalculationRef = useRef(false);
+  const recoveredDraftsRef = useRef<BufferedCharacterSaveRecord[]>([]);
+  const uncertainSaveRef = useRef<{ submitted: Record<string, unknown>; expectedUpdatedAt: string } | null>(null);
+  const [savePhase, setSavePhase] = useState<'idle' | 'saving' | 'failed'>('idle');
+  const [draftStored, setDraftStored] = useState(true);
+  const [isOnline, setIsOnline] = useState(typeof navigator === 'undefined' || navigator.onLine !== false);
+  const [loadError, setLoadError] = useState(false);
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const retryCountRef = useRef(0);
+  const retrySaveRef = useRef<() => void>(() => {});
+  const hasSavedRef = useRef(false);
+  const storageNoticeRef = useRef(false);
+  const rejectedSaveRef = useRef<Character | null>(null);
+
+  /** Only retire recovered snapshots after their merged values are accepted. */
+  const acknowledgeRecoveredDrafts = () => {
+    for (const record of recoveredDraftsRef.current) acknowledgeBufferedCharacterRecovery(record);
+    recoveredDraftsRef.current = [];
+  };
+  const clearSaveRetry = () => {
+    if (retryTimerRef.current !== null) clearTimeout(retryTimerRef.current);
+    retryTimerRef.current = null;
+  };
 
   // Always-current view of the atom (the `character` closure goes stale inside async
   // mutation callbacks), and the last character state we know the server holds — the
@@ -124,6 +138,7 @@ export default function useCharacter(
     characterRef.current = character;
   }, [character]);
   const lastSyncedRef = useRef<Character | null>(null);
+  const writeRevisionRef = useRef(0);
 
   // Latched when the server reports this session can read but not write the
   // character (RLS: e.g. anyone viewing a public sheet, incl. logged-out users).
@@ -139,105 +154,210 @@ export default function useCharacter(
   const conflictStreakRef = useRef(0);
   const MAX_CONFLICT_STREAK = 3;
 
-  const handleFetchedCharacter = (resultCharacter: Character | null | undefined) => {
-    if (resultCharacter) {
-      // This is authoritative server state — record it as the concurrency base even
-      // when the local atom already matches (so update-character keeps a fresh token).
-      lastSyncedRef.current = resultCharacter;
+  const handleFetchedCharacter = useCallback(
+    (resultCharacter: Character | null | undefined, restoredCharacter?: Character) => {
+      const currentCharacter = characterRef.current;
+      if (resultCharacter) {
+        const displayedCharacter = restoredCharacter ?? resultCharacter;
+        // This is authoritative server state — record it as the concurrency base even
+        // when the local atom already matches (so update-character keeps a fresh token).
+        lastSyncedRef.current = resultCharacter;
 
-      // Don't update if they're the same
-      if (isEqual(character, resultCharacter)) {
-        return;
-      }
-
-      if (character && resultCharacter) {
-        const diff = getDeepDiff(character, resultCharacter);
-        // If we can't detect a diff, don't update
-        if (Object.keys(diff).length === 0) {
+        // Don't update if they're the same
+        if (isEqual(currentCharacter, displayedCharacter)) {
           return;
         }
 
-        console.log('Doing extra update bc of discrepancies', diff);
-      }
+        if (currentCharacter && resultCharacter) {
+          const diff = getDeepDiff(currentCharacter, displayedCharacter);
+          // If we can't detect a diff, don't update
+          if (Object.keys(diff).length === 0) {
+            return;
+          }
 
-      // Update character
-      setCharacter(resultCharacter);
-
-      // Make sure we sync the enabled content sources
-      defineDefaultSources('PAGE', resultCharacter.content_sources?.enabled ?? []);
-
-      // Cache character customization for fast loading
-      saveCustomization({
-        background_image_url:
-          (resultCharacter.details?.background_image_url || getCachedPublicUser()?.background_image_url) ?? undefined,
-        sheet_theme: (resultCharacter.details?.sheet_theme || getCachedPublicUser()?.site_theme) ?? undefined,
-      });
-    } else {
-      // Character not found, probably due to unauthorized access
-      window.location.href = '/sheet-unauthorized';
-    }
-  };
-
-  // Fetch character from db
-  useEffect(() => {
-    (async () => {
-      // Before fetching the character, check if there's an autosaved version in localStorage and save it to the database if it exists
-      const key = `autosave-character-${characterId}`;
-      const pending = localStorage.getItem(key);
-      if (pending) {
-        const { token, body } = JSON.parse(pending);
-        const replayRes = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/update-character`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify(body),
-        });
-        // Only drop the buffered edit once the server has actually accepted it. If the
-        // replay fails (expired token -> 401, offline, 5xx) keep it so it retries on the
-        // next mount instead of silently discarding the user's only unsynced copy.
-        if (replayRes.ok) {
-          localStorage.removeItem(key);
+          console.log('Doing extra update bc of discrepancies', diff);
         }
-      }
 
-      // Now fetch the character from the database to ensure we have the latest version
-      const dbCharacter = await makeRequest<Character>('find-character', { id: characterId });
-      handleFetchedCharacter(dbCharacter);
-    })();
-  }, []);
+        // Update character
+        setCharacter(displayedCharacter);
+
+        // Make sure we sync the enabled content sources
+        defineDefaultSources('PAGE', displayedCharacter.content_sources?.enabled ?? []);
+
+        // Cache character customization for fast loading
+        saveCustomization({
+          background_image_url:
+            (displayedCharacter.details?.background_image_url || getCachedPublicUser()?.background_image_url) ??
+            undefined,
+          sheet_theme: (displayedCharacter.details?.sheet_theme || getCachedPublicUser()?.site_theme) ?? undefined,
+        });
+      } else {
+        // Character not found, probably due to unauthorized access
+        window.location.href = '/sheet-unauthorized';
+      }
+    },
+    [setCharacter]
+  );
+
+  const saveConflictRef = useRef(false);
+
+  /** Keep conflicting input recoverable until the same account chooses which copy to save. */
+  const offerConflictResolution = useCallback(
+    (remote: Character) => {
+      saveConflictRef.current = true;
+      hideNotification(`character-save-rejected-${characterId}`);
+      clearSaveRetry();
+      setSavePhase('idle');
+      const scope = saveScopeRef.current;
+      const actor = loadedActorRef.current;
+      const noticeId = `character-conflict-${characterId}`;
+      const resolve = (useLocal: boolean) => {
+        if (scope !== saveScopeRef.current || !actor || actor !== loadedActorRef.current) return;
+        const chosen = useLocal ? characterRef.current : remote;
+        if (!chosen) return;
+        if (!useLocal) {
+          const owned = getBufferedCharacterSave(characterId, actor);
+          if ('draft' in owned) acknowledgeBufferedCharacterRecovery(owned);
+          acknowledgeRecoveredDrafts();
+        } else {
+          const reconciled = reconcileBufferedCharacterSave(chosen, actor, remote, {
+            requiresCalculation: needsCalculationRef.current || options.type === 'EXECUTE_OPS',
+          });
+          setDraftStored(reconciled.status !== 'unavailable');
+        }
+        uncertainSaveRef.current = null;
+        lastSyncedRef.current = remote;
+        conflictStreakRef.current = 0;
+        saveConflictRef.current = false;
+        if (!useLocal) needsCalculationRef.current = false;
+        hideNotification(noticeId);
+        characterRef.current = cloneDeep(chosen);
+        setCharacter(characterRef.current);
+        setSavePhase('idle');
+      };
+      showNotification({
+        id: noticeId,
+        title: 'Conflicting character edits',
+        message: (
+          <>
+            <Text size='sm'>Choose which changes to keep.</Text>
+            <Group gap='xs' mt='xs'>
+              <Button size='xs' onClick={() => resolve(true)}>
+                Keep my edits
+              </Button>
+              <Button size='xs' variant='light' onClick={() => resolve(false)}>
+                Use saved version
+              </Button>
+            </Group>
+          </>
+        ),
+        color: 'yellow',
+        autoClose: false,
+        withCloseButton: false,
+      });
+    },
+    [characterId, options.type, setCharacter]
+  );
+
+  // Restore drafts into the editor. This path never writes around its save queue.
+  useEffect(() => {
+    let active = true;
+    const scope = ++saveScopeRef.current;
+    clearSaveRetry();
+    loadedActorRef.current = null;
+    setLoadedIdentity(null);
+    setLoadError(false);
+    setSavePhase('idle');
+    setDraftStored(true);
+    hasSavedRef.current = false;
+    rejectedSaveRef.current = null;
+    retryCountRef.current = 0;
+    uncertainSaveRef.current = null;
+    recoveredDraftsRef.current = [];
+    needsCalculationRef.current = false;
+    lastSyncedRef.current = null;
+    readOnlyRef.current = false;
+    saveConflictRef.current = false;
+    hideNotification(`character-conflict-${characterId}`);
+    conflictStreakRef.current = 0;
+    savingRef.current = false;
+    pendingSaveRef.current = null;
+    void (async () => {
+      // A failed request is not an authorization decision. Keep the route and offer retry.
+      const dbCharacter = await makeRequest<Character>('find-character', { id: characterId }, false, {
+        throwOnFailure: true,
+      });
+      if (!active) return;
+      if (!dbCharacter) {
+        handleFetchedCharacter(dbCharacter);
+        return;
+      }
+      loadedActorRef.current = sessionActorId;
+      const restored = sessionActorId ? loadBufferedCharacterSaves(characterId, sessionActorId) : null;
+      let displayed = dbCharacter;
+      const conflicts: string[] = [];
+      if (restored?.status === 'loaded') {
+        for (const record of restored.records) {
+          const draft = record.draft;
+          if (!draft.base || !draft.body.expected_updated_at) {
+            // Retain drafts without a common ancestor; replaying them could overwrite newer saves.
+            continue;
+          }
+          const merged = mergeCharacterSave(draft.base, draft.body, displayed, draft.submission?.body);
+          displayed = merged.character;
+          conflicts.push(...merged.conflicts);
+          needsCalculationRef.current ||= !!draft.requiresCalculation;
+          recoveredDraftsRef.current.push(record);
+        }
+      } else if (restored?.status === 'unavailable') setDraftStored(false);
+      handleFetchedCharacter(dbCharacter, displayed);
+      if (conflicts.length) {
+        // Original records remain available until the user resolves the conflict.
+        const firstBase = recoveredDraftsRef.current[0]?.draft.base;
+        if (firstBase) lastSyncedRef.current = { ...dbCharacter, ...firstBase };
+        offerConflictResolution(dbCharacter);
+      } else if (sessionActorId) {
+        if (recoveredDraftsRef.current.length) {
+          const reconciled = reconcileBufferedCharacterSave(displayed, sessionActorId, dbCharacter, {
+            requiresCalculation: needsCalculationRef.current,
+          });
+          setDraftStored(reconciled.status !== 'unavailable');
+        }
+        if (SAVED_CHARACTER_FIELDS.every((field) => characterSaveValuesEqual(displayed[field], dbCharacter[field])))
+          acknowledgeRecoveredDrafts();
+      }
+      setLoadedIdentity({ id: characterId, actor: sessionActorId });
+    })().catch((error: unknown) => {
+      if (!active) return;
+      console.error('Could not load character:', error);
+      setLoadError(true);
+      if (options.type === 'EXECUTE_OPS') options.data.onFinishLoading();
+    });
+    const retryLoadOnReconnect = () => {
+      if (active && !loadedActorRef.current) setLoadAttempt((attempt) => attempt + 1);
+    };
+    window.addEventListener('online', retryLoadOnReconnect);
+    return () => {
+      active = false;
+      saveScopeRef.current = scope + 1;
+      clearSaveRetry();
+      window.removeEventListener('online', retryLoadOnReconnect);
+      hideNotification(`character-conflict-${characterId}`);
+      hideNotification(`character-save-permission-${characterId}`);
+      hideNotification(`character-save-storage-${characterId}`);
+      hideNotification(`character-save-rejected-${characterId}`);
+      storageNoticeRef.current = false;
+    };
+  }, [characterId, sessionActorId, loadAttempt, handleFetchedCharacter, offerConflictResolution]);
 
   // Execute operations
   const [operationResults, setOperationResults] = useState<OperationCharacterResultPackage>();
   const executingOperations = useRef<number | null>(null);
+  const [operationError, setOperationError] = useState<string | null>(null);
+  const [isCalculating, setIsCalculating] = useState(false);
+  const [operationAttempt, setOperationAttempt] = useState(0);
 
   const [debouncedCharacter] = useDebouncedValue(character, 800);
-  const prevDebouncedCharacter = usePrevious(debouncedCharacter);
-  const setCharacterDebounced = useDebouncedCallback(setCharacter, 800);
-
-  const getCharacterPayload = (c: Character) => {
-    return {
-      name: c.name,
-      level: c.level,
-      experience: c.experience,
-      hp_current: c.hp_current,
-      hp_temp: c.hp_temp,
-      hero_points: c.hero_points,
-      stamina_current: c.stamina_current,
-      resolve_current: c.resolve_current,
-      inventory: c.inventory,
-      notes: c.notes,
-      details: c.details,
-      roll_history: c.roll_history,
-      custom_operations: c.custom_operations,
-      meta_data: c.meta_data,
-      options: c.options,
-      variants: c.variants,
-      content_sources: c.content_sources,
-      operation_data: c.operation_data,
-      spells: c.spells,
-      companions: c.companions,
-      campaign_id: c.campaign_id,
-    };
-  };
 
   const getUpdateHash = (c: Character | null | undefined) => {
     return hashData(
@@ -272,34 +392,84 @@ export default function useCharacter(
     );
   };
 
+  const currentOperationsHash = useMemo(() => getUpdateHash(character), [character]);
+  const debouncedOperationsHash = useMemo(() => getUpdateHash(debouncedCharacter), [debouncedCharacter]);
+  const operationContent = options.type === 'EXECUTE_OPS' ? options.data.content : undefined;
+  const operationContext = options.type === 'EXECUTE_OPS' ? options.data.context : undefined;
+  const onSourcesChangeRef = useRef<((sources: number[]) => void) | undefined>(undefined);
+  onSourcesChangeRef.current = options.type === 'EXECUTE_OPS' ? options.data.onSourcesChange : undefined;
+  const sourceKey = (ids: number[]) => [...new Set([COMMON_CORE_ID, ...ids])].sort((a, b) => a - b).join(',');
+  const characterSourcesKey = sourceKey(character?.content_sources?.enabled ?? []);
+  const loadedSources = operationContent?.defaultSources?.PAGE;
+  const contentSourcesMatch = !Array.isArray(loadedSources) || sourceKey(loadedSources) === characterSourcesKey;
+
   useEffect(() => {
-    if (options.type !== 'EXECUTE_OPS') return;
-    if (!debouncedCharacter) return;
+    if (!hasLoadedCharacter || !operationContext || contentSourcesMatch) return;
+    // Reload the page's package for the reconciled inputs, including unsynced local
+    // source choices. Re-reading server sources here could create a reload loop.
+    onSourcesChangeRef.current?.(characterRef.current?.content_sources?.enabled ?? []);
+  }, [hasLoadedCharacter, contentSourcesMatch, characterSourcesKey, characterId, operationContext]);
 
-    const prevOpsHash = getUpdateHash(prevDebouncedCharacter);
-    const opsHash = getUpdateHash(debouncedCharacter);
-    if (prevOpsHash === opsHash || executingOperations.current === opsHash) return;
-
-    console.log('> Executing ops #', opsHash);
-    executingOperations.current = opsHash;
-    executeOperations<OperationCharacterResultPackage>({
-      type: 'CHARACTER',
-      data: {
-        character: debouncedCharacter,
-        content: options.data.content,
-        context: options.data.context,
-      },
-    }).then((results) => handleOperationResults(results));
-  }, [debouncedCharacter]);
-
-  const handleOperationResults = (results: OperationCharacterResultPackage) => {
-    if (options.type !== 'EXECUTE_OPS') return;
-    if (!debouncedCharacter) return;
-    if (executingOperations.current !== getUpdateHash(debouncedCharacter)) {
-      // Old execution, ignore
-      console.log('... Ignoring outdated ops #', getUpdateHash(debouncedCharacter));
+  useEffect(() => {
+    if (
+      !hasLoadedCharacter ||
+      !contentSourcesMatch ||
+      options.type !== 'EXECUTE_OPS' ||
+      !debouncedCharacter ||
+      debouncedCharacter.id !== characterId
+    )
       return;
-    }
+    // Invalidate as soon as an edit arrives, then wait for its debounced input.
+    if (currentOperationsHash !== debouncedOperationsHash) return;
+    const controller = new AbortController();
+    executingOperations.current = debouncedOperationsHash;
+    setIsCalculating(true);
+    executeOperations<OperationCharacterResultPackage>(
+      {
+        type: 'CHARACTER',
+        data: { character: debouncedCharacter, content: options.data.content, context: options.data.context },
+      },
+      { signal: controller.signal }
+    )
+      .then((results) => {
+        if (controller.signal.aborted) return;
+        handleOperationResults(results, controller.signal);
+        setOperationError(null);
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted || isOperationCancelled(error)) return;
+        console.error('Character calculation failed:', error);
+        setOperationError('Your last successful calculation is preserved.');
+        options.data.onFinishLoading();
+      })
+      .finally(() => {
+        if (controller.signal.aborted) return;
+        executingOperations.current = null;
+        setIsCalculating(false);
+      });
+    return () => controller.abort();
+  }, [
+    characterId,
+    currentOperationsHash,
+    debouncedOperationsHash,
+    operationContent,
+    operationContext,
+    operationAttempt,
+    hasLoadedCharacter,
+    contentSourcesMatch,
+  ]);
+
+  const handleOperationResults = (results: OperationCharacterResultPackage, signal: AbortSignal) => {
+    if (options.type !== 'EXECUTE_OPS') return;
+    if (!debouncedCharacter) return;
+    if (signal.aborted) return;
+    // React batches functional updates without discarding earlier completion steps.
+    const commitCharacter: SetterOrUpdater<Character | null> = (update) => {
+      setCharacter((previous) => {
+        if (signal.aborted || previous?.id !== debouncedCharacter.id) return previous;
+        return typeof update === 'function' ? update(previous) : update;
+      });
+    };
 
     // Final execution pipeline:
     console.log('... Finished executing ops #', getUpdateHash(debouncedCharacter));
@@ -314,18 +484,13 @@ export default function useCharacter(
     }
 
     // Add the extra items to the inventory from variables
-    addExtraItems(
-      'CHARACTER',
-      options.data.content.items,
-      debouncedCharacter,
-      convertToSetEntity(setCharacterDebounced)
-    );
+    addExtraItems('CHARACTER', options.data.content.items, debouncedCharacter, convertToSetEntity(commitCharacter));
 
     // Check bulk limits
     checkBulkLimit(
       'CHARACTER',
       debouncedCharacter,
-      convertToSetEntity(setCharacterDebounced),
+      convertToSetEntity(commitCharacter),
       debouncedCharacter.options?.ignore_bulk_limit !== true
     );
 
@@ -335,78 +500,189 @@ export default function useCharacter(
     // Apply conditions after everything else
     applyConditions('CHARACTER', debouncedCharacter.details?.conditions ?? []);
 
-    if (debouncedCharacter.meta_data?.reset_hp !== false) {
-      // To reset hp, we need to confirm health
-
-      const handleRestHP = () => {
-        const { classHp } = getHealthValueParts('CHARACTER');
-        const maxHealth = getFinalHealthValue('CHARACTER');
-        // Don't clear reset_hp until the character has class HP - otherwise ancestry-only HP
-        // gets locked in before the class is selected, resulting in a too-low starting HP.
-        confirmHealth(`${maxHealth}`, maxHealth, debouncedCharacter, convertToSetEntity(setCharacterDebounced), classHp === 0);
-      };
-
-      // We run it twice for it to break out of the debouncing lock (not a perfect solution, but works)
-      handleRestHP();
-      setTimeout(() => {
-        handleRestHP();
-      }, 1000);
-    } else {
-      // Because of the drained condition, let's confirm health
+    // Normalize the latest HP inside the functional update. A slow calculation
+    // must not overwrite damage/healing entered after its original snapshot.
+    commitCharacter((previous) => {
+      if (!previous) return previous;
+      const { classHp } = getHealthValueParts('CHARACTER');
       const maxHealth = getFinalHealthValue('CHARACTER');
+      const resetHealth = previous.meta_data?.reset_hp !== false;
+      let normalized: Character | null = previous;
+      const retainHealth: SetterOrUpdater<Character | null> = (update) => {
+        normalized = typeof update === 'function' ? update(previous) : update;
+      };
       confirmHealth(
-        `${debouncedCharacter.hp_current}`,
+        `${resetHealth ? maxHealth : previous.hp_current}`,
         maxHealth,
-        debouncedCharacter,
-        convertToSetEntity(setCharacterDebounced)
+        previous,
+        convertToSetEntity(retainHealth),
+        resetHealth && classHp === 0,
+        'normalize'
       );
-    }
+      return normalized;
+    });
 
     // Save calculated stats
-    saveCalculatedStats('CHARACTER', debouncedCharacter, convertToSetEntity(setCharacterDebounced));
+    saveCalculatedStats('CHARACTER', debouncedCharacter, convertToSetEntity(commitCharacter));
 
     setOperationResults(results);
-    executingOperations.current = null;
 
-    setTimeout(() => {
-      options.data.onFinishLoading?.();
-    }, 100);
+    options.data.onFinishLoading();
   };
 
   // Serialized, latest-wins auto-save.
   //
-  // Saves must NOT overlap: update-character does a full-column replace of inventory,
-  // spells, etc. with no version guard, so if an older snapshot's write commits after
-  // a newer one, the newer inventory/spell edits are silently clobbered. We therefore
-  // keep at most ONE update-character in flight at a time and, while one is running,
-  // remember only the most recent pending snapshot to send next. This guarantees
-  // writes are strictly ordered and the final write always reflects the latest state.
+  // Each full-column write owns the current server version. Serialize writes and
+  // retain only the latest queued snapshot, then advance its version after success.
+  // The server guard handles concurrent writers on other devices.
   const savingRef = useRef(false);
-  const pendingSaveRef = useRef<Record<string, any> | null>(null);
+  const pendingSaveRef = useRef<QueuedCharacterSave | null>(null);
+  const canPersist = () =>
+    hasLoadedCharacter &&
+    !readOnlyRef.current &&
+    !saveConflictRef.current &&
+    characterRef.current?.id === characterId &&
+    lastSyncedRef.current?.id === characterId &&
+    !!loadedActorRef.current &&
+    loadedActorRef.current === sessionActorId &&
+    (options.type !== 'EXECUTE_OPS'
+      ? !needsCalculationRef.current
+      : !isCalculating &&
+        contentSourcesMatch &&
+        executingOperations.current === null &&
+        !operationError &&
+        !!operationResults &&
+        getUpdateHash(characterRef.current) === debouncedOperationsHash &&
+        !!options.data.content);
 
-  // Update character in db when state changed
-  useDidUpdate(() => {
-    if (!debouncedCharacter) return;
-    // View-only session — the server told us our writes are RLS-denied.
-    if (readOnlyRef.current) return;
-    // Defense-in-depth against the empty-corpus wipe (#235): if content failed to load,
-    // operations ran against nothing (HP/boosts/choices degrade to empty) — never persist
-    // that. The page-level guard should prevent mounting here at all, but the save site is
-    // where the damage happens, so we refuse the write directly too.
-    if (options.type === 'EXECUTE_OPS' && isContentPackageEmpty(options.data.content)) return;
-    mutateCharacter(getCharacterPayload(debouncedCharacter));
-  }, [debouncedCharacter]);
-  const { mutate: mutateCharacterRaw } = useMutation({
-    mutationFn: async (data: Record<string, any>) => {
-      // Send our last-known server token so the write is rejected (not silently
-      // applied) if the row changed since. Omitted when unknown (e.g. before the
-      // updated_at migration ships), which keeps the previous unconditional behavior.
-      const expected_updated_at = lastSyncedRef.current?.updated_at;
-      const resData = await makeRequest('update-character', {
-        id: characterId,
-        ...data,
-        ...(expected_updated_at ? { expected_updated_at } : {}),
+  const canPersistRef = useRef(canPersist);
+  canPersistRef.current = canPersist;
+
+  useAutoSave(
+    characterId,
+    () => ({
+      character: characterRef.current,
+      base: lastSyncedRef.current,
+      actorId: loadedActorRef.current,
+      // Retain raw inputs locally through navigation even while their derived state
+      // is waiting or failed. The flag prevents automatic server replay.
+      canBuffer: !readOnlyRef.current && loadedActorRef.current === sessionActorId,
+      forceBuffer: savingRef.current || !!uncertainSaveRef.current,
+      requiresCalculation:
+        saveConflictRef.current || (!canPersist() && (needsCalculationRef.current || options.type === 'EXECUTE_OPS')),
+    }),
+    setDraftStored
+  );
+
+  useEffect(() => {
+    if (!operationError || !loadedActorRef.current) return;
+    reportClientFailure('calculation_failed');
+  }, [operationError, characterId]);
+
+  const isCurrentSave = (save: QueuedCharacterSave) =>
+    save.scope === saveScopeRef.current &&
+    save.character.id === characterId &&
+    loadedActorRef.current === save.actorId &&
+    sessionActorId === save.actorId;
+
+  /** Incoming reads and rejected saves share one merge, draft and conflict-resolution path. */
+  const receiveRemoteCharacter = (remote: Character, submitted?: Record<string, unknown>, repeatedConflict = false) => {
+    const base = lastSyncedRef.current;
+    const merge =
+      readOnlyRef.current || !loadedActorRef.current
+        ? { character: cloneDeep(remote), conflicts: [] }
+        : mergeCharacterSave(base, characterRef.current, remote, submitted);
+    const merged = merge.character;
+    pendingSaveRef.current = null;
+    if (merge.conflicts.length || repeatedConflict) {
+      characterRef.current = merged;
+      setCharacter(merged);
+      offerConflictResolution(remote);
+      return null;
+    }
+    const changed = SAVED_CHARACTER_FIELDS.some(
+      (field) => !characterSaveValuesEqual(merged[field], characterRef.current?.[field])
+    );
+    const needsSave = SAVED_CHARACTER_FIELDS.some((field) => !characterSaveValuesEqual(merged[field], remote[field]));
+    // Advance the authoritative baseline BEFORE publishing incoming state. A clean
+    // remote edit is already saved; autosave must not echo it back to the server.
+    lastSyncedRef.current = remote;
+    const actor = loadedActorRef.current;
+    if (actor && !readOnlyRef.current) {
+      const reconciled = reconcileBufferedCharacterSave(merged, actor, remote, {
+        requiresCalculation:
+          needsCalculationRef.current ||
+          (options.type === 'EXECUTE_OPS' &&
+            (!canPersistRef.current() || getUpdateHash(merged) !== debouncedOperationsHash)),
       });
+      setDraftStored(reconciled.status !== 'unavailable');
+    }
+    characterRef.current = merged;
+    if (!needsSave) {
+      retryCountRef.current = 0;
+      rejectedSaveRef.current = null;
+      hideNotification(`character-save-rejected-${characterId}`);
+      acknowledgeRecoveredDrafts();
+    }
+    if (changed) setCharacter(merged);
+    return { needsSave };
+  };
+  const receiveRemoteRef = useRef(receiveRemoteCharacter);
+  receiveRemoteRef.current = receiveRemoteCharacter;
+
+  // A successful calculation can release an edit that was waiting for derived values.
+  useDidUpdate(() => {
+    if (!debouncedCharacter || !canPersist()) return;
+    if (
+      !savingRef.current &&
+      !uncertainSaveRef.current &&
+      SAVED_CHARACTER_FIELDS.every((field) =>
+        characterSaveValuesEqual(characterRef.current?.[field], lastSyncedRef.current?.[field])
+      )
+    )
+      return;
+    if (characterRef.current) mutateCharacter(characterRef.current);
+  }, [debouncedCharacter, isCalculating, operationError, operationResults, sessionActorId]);
+  const { mutate: mutateCharacterRaw } = useMutation({
+    mutationFn: async (save: QueuedCharacterSave) => {
+      if (!isCurrentSave(save)) throw new Error('Character save scope changed');
+      const uncertain = uncertainSaveRef.current;
+      if (uncertain) {
+        // A timeout can follow a committed write. Read and reconcile before another POST.
+        const remote = await makeRequest<Character>('find-character', { id: save.character.id }, false, {
+          expectedActorId: save.actorId,
+          throwOnFailure: true,
+        });
+        if (!remote) throw new Error('Could not recover character save');
+        return {
+          expected_updated_at: uncertain.expectedUpdatedAt,
+          submitted: uncertain.submitted,
+          forbidden: false,
+          conflict: true,
+          server: remote,
+        };
+      }
+      const expected_updated_at = lastSyncedRef.current?.updated_at;
+      if (!expected_updated_at) throw new Error('Reload the character to recover its save version');
+      const data = Object.fromEntries(SAVED_CHARACTER_FIELDS.map((field) => [field, save.character[field]]));
+      writeRevisionRef.current += 1;
+      uncertainSaveRef.current = { submitted: data, expectedUpdatedAt: expected_updated_at };
+      if (
+        journalCharacterSaveSubmission(save.character.id, save.actorId, data, expected_updated_at).status ===
+        'unavailable'
+      )
+        setDraftStored(false);
+      const resData = await makeRequest(
+        'update-character',
+        {
+          id: save.character.id,
+          ...data,
+          ...(expected_updated_at ? { expected_updated_at } : {}),
+        },
+        false,
+        { expectedActorId: save.actorId, throwOnRejection: true }
+      );
+      const request = { expected_updated_at, submitted: data };
       // makeRequest returns null for every failure (HTTP error, timeout, JSend
       // error envelope). Throw so onError runs — otherwise a failed save was
       // indistinguishable from a successful one and users lost edits silently.
@@ -415,156 +691,288 @@ export default function useCharacter(
       }
       // Forbidden: RLS lets this session read the character but not write it.
       if (resData && !isArray(resData) && (resData as any).__forbidden) {
-        return { forbidden: true, conflict: false, server: null as Character | null };
+        return { ...request, forbidden: true, conflict: false, server: null as Character | null };
       }
       // Conflict: the server returned the current row instead of overwriting.
       if (resData && !isArray(resData) && (resData as any).__conflict) {
         return {
+          ...request,
           forbidden: false,
           conflict: true,
           server: ((resData as any).character ?? null) as Character | null,
         };
       }
       const row = isArray(resData) && resData.length > 0 ? (resData[0] as Character) : null;
-      return { forbidden: false, conflict: false, server: row };
+      if (!row || row.id !== save.character.id) throw new Error('Character save returned no saved row');
+      return { ...request, forbidden: false, conflict: false, server: row };
     },
-    onSuccess: (result) => {
-      if (!result) return;
+    onSuccess: (result, save) => {
+      if (!result || !isCurrentSave(save)) return;
+      uncertainSaveRef.current = null;
+      clearSaveRetry();
+      setSavePhase('idle');
       if (result.forbidden) {
-        // View-only session (e.g. a public sheet). Stop auto-saving entirely —
-        // nothing we send will ever be accepted, and retrying just spams the API.
+        // Public viewers can calculate locally. Only a known editor losing access
+        // needs a warning; neither case should continue sending rejected writes.
         readOnlyRef.current = true;
         pendingSaveRef.current = null;
+        if (save.character.user_id === save.actorId || hasSavedRef.current)
+          showNotification({
+            id: `character-save-permission-${characterId}`,
+            title: 'Changes not saved',
+            message: 'You no longer have permission to edit this character.',
+            color: 'yellow',
+            autoClose: false,
+          });
         console.warn('Character is view-only for this session; auto-save disabled.');
         return;
       }
       if (result.conflict) {
         const remote = result.server;
         if (!remote) return;
-        // Drop any stale queued snapshot — the merge produces the correct next save.
-        pendingSaveRef.current = null;
-        // The three-way merge needs the PREVIOUS synced state as its base; adopt the
-        // fresh concurrency token only after capturing it (and even when we skip
-        // merging below, so the next save uses the current token).
-        const base = lastSyncedRef.current;
-        lastSyncedRef.current = remote;
-        conflictStreakRef.current += 1;
-        if (conflictStreakRef.current >= MAX_CONFLICT_STREAK) {
-          // Merging again would only re-trigger another save → conflict round.
-          console.warn('Repeated save conflicts; pausing merge-and-retry until a save succeeds.');
-          return;
+        if (remote.updated_at !== result.expected_updated_at) conflictStreakRef.current += 1;
+        const received = receiveRemoteRef.current(
+          remote,
+          result.submitted,
+          conflictStreakRef.current >= MAX_CONFLICT_STREAK
+        );
+        if (!received) return;
+        if (received.needsSave && characterRef.current) {
+          pendingSaveRef.current = { ...save, character: characterRef.current };
         }
-        const merged = mergeCharacterOnConflict(base, characterRef.current, remote);
-        // Only apply + notify when the merge actually changes local data. Equal on
-        // every saved field means the server row already matches what we have
-        // (pure token skew) — updating state anyway would fire a pointless save.
-        const changed =
-          !characterRef.current ||
-          SAVED_CHARACTER_FIELDS.some(
-            (field) => !isEqual((merged as any)[field], (characterRef.current as any)[field])
-          );
-        if (!changed) return;
-        setCharacter(merged);
-        showNotification({
-          icon: <IconRefresh />,
-          title: 'Merged a remote update',
-          message: 'This character was changed elsewhere; your edits were merged in.',
-          autoClose: 2500,
-        });
       } else if (result.server) {
         // Record the authoritative post-write state (incl. the new updated_at token).
         conflictStreakRef.current = 0;
+        retryCountRef.current = 0;
+        hasSavedRef.current = true;
+        rejectedSaveRef.current = null;
+        hideNotification(`character-save-rejected-${characterId}`);
         lastSyncedRef.current = result.server;
+        acknowledgeBufferedCharacterSave(
+          save.character.id,
+          save.actorId,
+          result.submitted,
+          result.expected_updated_at,
+          result.server.updated_at
+        );
+        acknowledgeRecoveredDrafts();
         console.log('> Fetched updated character: #', getUpdateHash(character), 'vs.', getUpdateHash(result.server));
       }
     },
-    onError: (error) => {
+    onError: (error, save) => {
+      if (!isCurrentSave(save)) return;
       console.error('Character save failed:', error);
-      // If the real cause is a dead session, that persistent notification already
-      // explains it; a generic "check your connection" toast would just confuse.
-      if (hasSessionExpiredNotice()) return;
-      showNotification({
-        id: 'character-save-failed',
-        icon: <IconAlertCircle />,
-        title: 'Failed to save character',
-        message: 'Your changes could not be saved. Please check your connection and try again.',
-        color: 'red',
-        autoClose: 5000,
-      });
+      reportClientFailure('save_failed');
+      setSavePhase('failed');
+      clearSaveRetry();
+      if (error instanceof RequestRejectedError) {
+        // The server explicitly rejected this snapshot. Keep the edit, clear its
+        // uncertain-write journal, and wait for a changed payload before retrying.
+        rejectedSaveRef.current = cloneDeep(save.character);
+        uncertainSaveRef.current = null;
+        const current = characterRef.current;
+        const base = lastSyncedRef.current;
+        if (current && base)
+          setDraftStored(
+            reconcileBufferedCharacterSave(current, save.actorId, base, {
+              requiresCalculation: !canPersistRef.current(),
+            }).status !== 'unavailable'
+          );
+        if (
+          current &&
+          SAVED_CHARACTER_FIELDS.every((field) => characterSaveValuesEqual(current[field], save.character[field]))
+        )
+          showNotification({
+            id: `character-save-rejected-${characterId}`,
+            title: 'Changes not saved',
+            message: 'These changes could not be saved.',
+            color: 'yellow',
+            autoClose: false,
+          });
+        return;
+      }
+      // A connection failure is recoverable while the local draft is safe. Retry
+      // quietly, including when a flaky network never fires an `online` event.
+      if (!hasSessionExpiredNotice()) {
+        const delay = Math.min(30000, 2000 * 2 ** Math.min(retryCountRef.current++, 4));
+        retryTimerRef.current = setTimeout(() => {
+          retryTimerRef.current = null;
+          retrySaveRef.current();
+        }, delay);
+      }
     },
-    onSettled: () => {
+    onSettled: (_result, _error, save) => {
+      if (!isCurrentSave(save)) return;
       // Once the in-flight save resolves, flush the latest pending snapshot (if any).
       const next = pendingSaveRef.current;
       pendingSaveRef.current = null;
-      if (next) {
-        mutateCharacterRaw(next);
+      if (_error instanceof RequestRejectedError && next) {
+        savingRef.current = false;
+        mutateCharacter(characterRef.current ?? next.character);
+        return;
+      }
+      if (!_error && next && canPersistRef.current()) {
+        setSavePhase('saving');
+        mutateCharacterRaw({ ...next, character: characterRef.current ?? next.character });
       } else {
         savingRef.current = false;
       }
     },
   });
-  const { mutateAsync: mutateCharacterAsync } = useMutation({
-    mutationFn: async (data: Record<string, any>) => {
-      const resData = await makeRequest('update-character', {
-        id: characterId,
-        ...data,
-      });
-      return isArray(resData) && resData.length > 0 ? (resData[0] as Character) : null;
-    },
-    onSuccess: (c) => {
-      if (c) {
-        console.log('> Updated character (async) #', getUpdateHash(c));
-        handleFetchedCharacter(c);
-      }
-    },
-  });
-
-  const saveCharacter = async (c: Character) => {
-    return await mutateCharacterAsync(getCharacterPayload(c));
-  };
-
-  const mutateCharacter = (data: Record<string, any>) => {
-    if (readOnlyRef.current) return;
+  const mutateCharacter = (snapshot: Character): void => {
+    if (!canPersist() || !loadedActorRef.current) return;
+    if (
+      rejectedSaveRef.current &&
+      SAVED_CHARACTER_FIELDS.every((field) =>
+        characterSaveValuesEqual(snapshot[field], rejectedSaveRef.current?.[field])
+      )
+    )
+      return;
+    if (rejectedSaveRef.current) {
+      rejectedSaveRef.current = null;
+      hideNotification(`character-save-rejected-${characterId}`);
+    }
+    const save = { character: snapshot, actorId: loadedActorRef.current, scope: saveScopeRef.current };
     if (savingRef.current) {
-      // A save is already in flight — keep only the newest snapshot to send next.
-      pendingSaveRef.current = data;
+      // Keep the freshest snapshot while the current write owns the server version.
+      pendingSaveRef.current = save;
       return;
     }
+    clearSaveRetry();
     savingRef.current = true;
-    mutateCharacterRaw(data);
+    setSavePhase('saving');
+    mutateCharacterRaw(save);
   };
 
-  // Poll remote character updates - only if the character hasn't been updated recently
-  const [lDebouncedCharacter] = useDebouncedValue(character, 5000);
-  const notRecentlyUpdated = !!(
-    !executingOperations &&
-    lDebouncedCharacter &&
-    isEqual(lDebouncedCharacter, character) &&
-    isEqual(debouncedCharacter, character)
-  );
-  useQuery({
-    queryKey: [`find-character-polling-updates-${characterId}`],
-    queryFn: async () => {
-      const polledCharacter = await makeRequest<Character>('find-character', {
-        id: characterId,
-      });
+  const saveCharacter = (snapshot: Character): void => {
+    characterRef.current = snapshot;
+    mutateCharacter(snapshot);
+  };
 
-      if (notRecentlyUpdated && Object.keys(getDeepDiff(character, polledCharacter)).length > 0) {
-        showNotification({
-          icon: <IconRefresh />,
-          title: `Updating character...`,
-          message: `Received a remote update`,
-          autoClose: 1500,
-        });
-        setCharacter(polledCharacter);
+  // React Query owns polling, visibility/reconnect behavior and request deduplication.
+  // Read snapshots carry their starting version so delayed reads cannot undo newer saves.
+  const { data: remoteSnapshot } = useQuery({
+    queryKey: ['character-remote-updates', characterId, sessionActorId],
+    queryFn: async () => {
+      const context = {
+        scope: saveScopeRef.current,
+        actor: loadedActorRef.current,
+        baseVersion: lastSyncedRef.current?.updated_at,
+        writeRevision: writeRevisionRef.current,
+      };
+      const remote = await makeRequest<Character>('find-character', { id: characterId }, false, {
+        ...(context.actor ? { expectedActorId: context.actor } : {}),
+        throwOnFailure: true,
+      });
+      if (!remote) return { ...context, character: null };
+      const version = remoteCharacterVersionSchema.safeParse(remote);
+      if (!version.success || version.data.id !== characterId || !version.data.updated_at) {
+        console.warn('Ignoring an invalid remote character version');
+        throw new Error('Remote character version is unavailable');
       }
-      return polledCharacter;
+      return { ...context, character: remote };
     },
-    refetchInterval: 1000,
-    enabled: false, // notRecentlyUpdated, Fix polling on char item update
+    enabled: hasLoadedCharacter && isOnline && !loadError && !saveConflictRef.current,
+    refetchInterval: REMOTE_CHARACTER_INTERVAL,
+    refetchIntervalInBackground: false,
+    refetchOnWindowFocus: 'always',
+    refetchOnReconnect: 'always',
+    retry: false,
   });
 
+  useEffect(() => {
+    if (
+      !hasLoadedCharacter ||
+      !remoteSnapshot?.character ||
+      remoteSnapshot.scope !== saveScopeRef.current ||
+      remoteSnapshot.actor !== loadedActorRef.current ||
+      remoteSnapshot.actor !== sessionActorId ||
+      remoteSnapshot.baseVersion !== lastSyncedRef.current?.updated_at ||
+      remoteSnapshot.writeRevision !== writeRevisionRef.current ||
+      savingRef.current ||
+      uncertainSaveRef.current ||
+      saveConflictRef.current
+    )
+      return;
+    const remote = remoteSnapshot.character;
+    const base = lastSyncedRef.current;
+    if (remote.id !== characterId || !base?.updated_at || !remote.updated_at || remote.updated_at === base.updated_at)
+      return;
+    if (compareCharacterVersions(remote.updated_at, base.updated_at) === -1) return;
+    receiveRemoteRef.current(remote);
+  }, [remoteSnapshot, hasLoadedCharacter, characterId, sessionActorId]);
+
+  retrySaveRef.current = () => {
+    const current = characterRef.current;
+    if (!current || savingRef.current || !canPersistRef.current() || hasSessionExpiredNotice()) return;
+    if (
+      !uncertainSaveRef.current &&
+      SAVED_CHARACTER_FIELDS.every((field) => characterSaveValuesEqual(current[field], lastSyncedRef.current?.[field]))
+    )
+      return;
+    mutateCharacter(current);
+  };
+  useEffect(() => {
+    const wake = () => {
+      setIsOnline(typeof navigator === 'undefined' || navigator.onLine !== false);
+      retrySaveRef.current();
+    };
+    const offline = () => setIsOnline(false);
+    const visible = () => {
+      if (document.visibilityState === 'visible') wake();
+    };
+    window.addEventListener('online', wake);
+    window.addEventListener('focus', wake);
+    window.addEventListener('offline', offline);
+    document.addEventListener('visibilitychange', visible);
+    return () => {
+      clearSaveRetry();
+      window.removeEventListener('online', wake);
+      window.removeEventListener('focus', wake);
+      window.removeEventListener('offline', offline);
+      document.removeEventListener('visibilitychange', visible);
+    };
+  }, [characterId, sessionActorId]);
+
+  const hasPendingChanges =
+    !!uncertainSaveRef.current ||
+    !character ||
+    SAVED_CHARACTER_FIELDS.some((field) => !characterSaveValuesEqual(character[field], lastSyncedRef.current?.[field]));
+  /** Only warn when pending edits cannot be kept safely through closing the page. */
+  useEffect(() => {
+    const needsNotice =
+      hasLoadedCharacter && !!sessionActorId && !draftStored && hasPendingChanges && !readOnlyRef.current;
+    if (needsNotice === storageNoticeRef.current) return;
+    storageNoticeRef.current = needsNotice;
+    const id = `character-save-storage-${characterId}`;
+    if (!needsNotice) {
+      hideNotification(id);
+      return;
+    }
+    showNotification({
+      id,
+      title: 'Changes not saved',
+      message: 'Keep this page open until saving completes.',
+      color: 'yellow',
+      autoClose: false,
+    });
+  }, [characterId, sessionActorId, hasLoadedCharacter, draftStored, hasPendingChanges, savePhase]);
+  const saveState: CharacterSaveState = readOnlyRef.current
+    ? 'read-only'
+    : saveConflictRef.current
+      ? 'conflict'
+      : !isOnline && hasPendingChanges
+        ? 'offline'
+        : savePhase === 'failed'
+          ? 'failed'
+          : savePhase === 'saving'
+            ? 'saving'
+            : hasPendingChanges
+              ? 'pending'
+              : 'saved';
+
   const isFinished =
+    hasLoadedCharacter &&
     // There must be a character
     !!character &&
     // It must be the requested one
@@ -576,85 +984,78 @@ export default function useCharacter(
     character,
     setCharacter,
     saveCharacter,
-    isLoading: !isFinished,
+    isLoading: !isFinished && !operationError && !loadError,
+    saveState,
+    draftStored,
+    retrySave: () => retrySaveRef.current(),
+    loadError,
+    retryLoad: () => setLoadAttempt((attempt) => attempt + 1),
     results: operationResults ?? null,
+    operationError,
+    isCalculating,
+    retryOperations: () => setOperationAttempt((attempt) => attempt + 1),
   };
 }
 
-/**
- * Custom hook to auto-save character data to localStorage when the page is closed or hidden, and to sync the auth token with Supabase session
- * @param character - The character data to auto-save
- * @param characterId - The ID of the character, used for namespacing the localStorage key
- * @returns void
- */
-function useAutoSave(character: Character | null, characterId: number) {
-  const characterRef = useRef(character);
-  const tokenRef = useRef<string>(import.meta.env.VITE_SUPABASE_KEY);
+type AutoSaveSnapshot = {
+  character: Character | null;
+  base: Character | null;
+  actorId: string | null;
+  canBuffer: boolean;
+  forceBuffer: boolean;
+  requiresCalculation: boolean;
+};
 
+/** Buffer eligible changes during editing and synchronously on pagehide or navigation. */
+function useAutoSave(
+  characterId: number,
+  getSnapshot: () => AutoSaveSnapshot,
+  onStorage: (stored: boolean) => void
+): void {
+  const snapshotRef = useRef(getSnapshot);
+  snapshotRef.current = getSnapshot;
+
+  const saveImmediately = useCallback(() => {
+    const { character: current, base, actorId, canBuffer, forceBuffer, requiresCalculation } = snapshotRef.current();
+    if (!canBuffer || !actorId || !current || current.id !== characterId || base?.id !== characterId) return;
+    // Loading the remote row must not replace a retained local recovery copy.
+    if (
+      !forceBuffer &&
+      SAVED_CHARACTER_FIELDS.every((field) => characterSaveValuesEqual(current[field], base[field]))
+    ) {
+      if (!requiresCalculation) {
+        acknowledgeBufferedCharacterSave(
+          current.id,
+          actorId,
+          Object.fromEntries(SAVED_CHARACTER_FIELDS.map((field) => [field, current[field]])),
+          base.updated_at,
+          base.updated_at,
+          true
+        );
+      }
+      return;
+    }
+    const buffered = bufferCharacterSave(current, actorId, base.updated_at, { requiresCalculation, base });
+    onStorage(buffered.status === 'stored');
+  }, [characterId, onStorage]);
+
+  // Preserve inputs before auth events or navigation can unmount the editor.
+  // Pending derived values stay local until the next successful calculation.
   useEffect(() => {
-    characterRef.current = character;
-  }, [character]);
-
+    saveImmediately();
+  });
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.access_token) tokenRef.current = session.access_token;
-    });
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session?.access_token) tokenRef.current = session.access_token;
-    });
-    return () => subscription.unsubscribe();
-  }, []);
-
-  useEffect(() => {
-    const saveImmediately = () => {
-      const c = characterRef.current;
-      if (!c) return;
-      // localStorage.setItem is synchronous — guaranteed to complete even on tab close
-      localStorage.setItem(
-        `autosave-character-${characterId}`,
-        JSON.stringify({
-          token: tokenRef.current,
-          body: {
-            id: characterId,
-            name: c.name,
-            level: c.level,
-            experience: c.experience,
-            hp_current: c.hp_current,
-            hp_temp: c.hp_temp,
-            hero_points: c.hero_points,
-            stamina_current: c.stamina_current,
-            resolve_current: c.resolve_current,
-            inventory: c.inventory,
-            notes: c.notes,
-            details: c.details,
-            roll_history: c.roll_history,
-            custom_operations: c.custom_operations,
-            meta_data: c.meta_data,
-            options: c.options,
-            variants: c.variants,
-            content_sources: c.content_sources,
-            operation_data: c.operation_data,
-            spells: c.spells,
-            companions: c.companions,
-            campaign_id: c.campaign_id,
-          },
-        })
-      );
-    };
-
     const onVisibilityChange = () => {
       if (document.visibilityState === 'hidden') saveImmediately();
     };
-
     document.addEventListener('visibilitychange', onVisibilityChange);
     window.addEventListener('pagehide', saveImmediately);
+    window.addEventListener('wg:before-update', saveImmediately);
     return () => {
       document.removeEventListener('visibilitychange', onVisibilityChange);
       window.removeEventListener('pagehide', saveImmediately);
-      // Also save on SPA navigation (unmount), since pagehide won't fire for in-app routing
+      window.removeEventListener('wg:before-update', saveImmediately);
       saveImmediately();
     };
-  }, []);
+  }, [characterId, saveImmediately]);
 }

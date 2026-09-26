@@ -9,6 +9,8 @@
     "predeploy": "tsc && vite build",
     "deploy": "gh-pages -d dist",
     "lint": "eslint src --ext ts,tsx --report-unused-disable-directives",
+    "test:rules": "node --test scripts/content-source-operations.test.mjs scripts/feat-selection.test.mjs scripts/language-operations.test.mjs scripts/eidolon-runes.test.mjs scripts/item-drawers.test.mjs scripts/inventory-panel.test.mjs scripts/operation-removal.test.mjs scripts/skill-progression.test.mjs scripts/pf2e-stress-audit.mjs scripts/condition-compilation.test.mjs scripts/health-transitions.test.mjs scripts/modifier-math.test.mjs scripts/pf2e-matrix.test.mjs scripts/homebrew-operations.test.mjs scripts/reclaimant-plea.test.mjs scripts/rootball-chair.test.mjs",
+    "test:infra": "node --test scripts/operation-lifecycle.test.mjs scripts/session-recovery.test.mjs scripts/character-save-lifecycle.test.mjs scripts/encounter-character-writer.test.mjs scripts/content-cache.test.mjs scripts/content-selection.test.mjs scripts/browser-recovery.test.mjs scripts/character-health-merge.test.mjs scripts/operation-content-package.test.mjs scripts/theme-color.test.mjs",
     "preview": "vite preview",
     "start:local": "vite",
     "build:local": "tsc && vite build",
@@ -20,7 +22,10 @@
     "cy:run": "cypress run",
     "cy:e2e": "CYPRESS_BASE_URL=http://localhost:3000 CYPRESS_TEST_EMAIL=test@wanderersguide.app CYPRESS_TEST_PASSWORD=test1234 cypress run",
     "cy:e2e:open": "CYPRESS_BASE_URL=http://localhost:3000 CYPRESS_TEST_EMAIL=test@wanderersguide.app CYPRESS_TEST_PASSWORD=test1234 cypress open",
-    "validate:content": "esbuild scripts/validate-content.ts --bundle --platform=node --format=esm --target=node20 --outfile=scripts/.dist/validate.mjs && node scripts/.dist/validate.mjs"
+    "validate:content": "esbuild scripts/validate-content.ts --bundle --platform=node --format=esm --target=node20 --outfile=scripts/.dist/validate.mjs && node scripts/.dist/validate.mjs",
+    "audit:content": "esbuild scripts/audit-content.ts --bundle --platform=node --format=esm --target=node20 --outfile=scripts/.dist/audit.mjs && node scripts/.dist/audit.mjs",
+    "test:audit:content": "esbuild scripts/audit-content.ts --bundle --platform=node --format=esm --target=node20 --outfile=scripts/.dist/audit.mjs && node --test scripts/audit-content.test.mjs",
+    "test:build": "node scripts/check-mobile-build.mjs"
   },
   "dependencies": {
     "@mantine/carousel": "^9.0.0",
@@ -97,6 +102,7 @@
     "@typescript-eslint/parser": "^6.20.0",
     "@vitejs/plugin-react": "^4.6.0",
     "cypress": "^13.8.1",
+    "esbuild": "0.25.12",
     "eslint": "^8.56.0",
     "eslint-config-prettier": "^9.1.0",
     "eslint-plugin-prettier": "^5.1.3",

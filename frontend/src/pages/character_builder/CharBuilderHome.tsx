@@ -1,3 +1,4 @@
+import { CharacterLoadError } from '@common/CharacterLoadError';
 import { generateNames } from '@ai/fantasygen-dev/name-controller';
 import { GroupLinkSwitch, LinkSwitch, LinksGroup } from '@common/LinksGroup';
 import {
@@ -30,6 +31,8 @@ import {
   HoverCard,
   List,
   Anchor,
+  Center,
+  Loader,
 } from '@mantine/core';
 import { getHotkeyHandler, useElementSize, useMediaQuery } from '@mantine/hooks';
 import { modals, openContextModal } from '@mantine/modals';
@@ -85,6 +88,7 @@ import { cloneDeep, isEqual, uniq } from 'lodash-es';
 import BlurBox from '@common/BlurBox';
 import { DisplayIcon } from '@common/IconDisplay';
 import useCharacter from '@utils/use-character';
+import { resolveThemeColor } from '@utils/theme-color';
 
 export default function CharBuilderHome(props: { characterId: number; pageHeight: number }) {
   const theme = useMantineTheme();
@@ -96,7 +100,7 @@ export default function CharBuilderHome(props: { characterId: number; pageHeight
   const queryClient = useQueryClient();
   const [_drawer, openDrawer] = useAtom(drawerState);
 
-  const { character, setCharacter } = useCharacter(props.characterId, {
+  const { character, setCharacter, isLoading, loadError, retryLoad } = useCharacter(props.characterId, {
     type: 'SIMPLE',
   });
 
@@ -946,7 +950,7 @@ export default function CharBuilderHome(props: { characterId: number; pageHeight
             size='xs'
             label={<Text fz='sm'>Color Theme</Text>}
             placeholder='Character Color Theme'
-            defaultValue={character?.details?.sheet_theme?.color || GUIDE_BLUE}
+            defaultValue={resolveThemeColor(character?.details?.sheet_theme?.color)}
             swatches={[
               '#25262b',
               '#868e96',
@@ -964,7 +968,7 @@ export default function CharBuilderHome(props: { characterId: number; pageHeight
               '#fd7e14',
             ]}
             swatchesPerRow={7}
-            onChange={(color) => {
+            onChangeEnd={(color) => {
               if (!hasPatreonAccess(getCachedPublicUser(), 1)) {
                 displayPatronOnly();
                 return;
@@ -1302,6 +1306,17 @@ export default function CharBuilderHome(props: { characterId: number; pageHeight
     });
   };
 
+  // The route's cached character may render before the save hook finishes loading
+  // its authoritative version. Keep inputs closed until that save context is ready.
+  if (loadError) return <CharacterLoadError onRetry={retryLoad} />;
+
+  if (isLoading)
+    return (
+      <Center h={300}>
+        <Loader aria-label='Loading character' />
+      </Center>
+    );
+
   return (
     <Stack gap={topGap}>
       <Group justify='center' ref={ref} wrap='nowrap'>
@@ -1351,7 +1366,7 @@ export default function CharBuilderHome(props: { characterId: number; pageHeight
                 <TextInput
                   label='Name'
                   placeholder='Unknown Wanderer'
-                  defaultValue={character?.name === 'Unknown Wanderer' ? '' : character?.name}
+                  value={character?.name === 'Unknown Wanderer' ? '' : (character?.name ?? '')}
                   onChange={(e) => {
                     setCharacter((prev) => {
                       if (!prev) return prev;
